@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=rcord
+GenericName=Chat Client
+Comment=A fast, native Discord client
+Exec=rcord %U
+Icon=rcord
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=discord;chat;voice;
+StartupWMClass=rcord
+StartupNotify=true

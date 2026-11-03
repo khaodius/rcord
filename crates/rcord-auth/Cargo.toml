@@ -1,0 +1,27 @@
+[package]
+name = "rcord-auth"
+description = "QR code sign-in and token storage for rcord"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+futures.workspace = true
+http.workspace = true
+keyring.workspace = true
+rcord-rest.workspace = true
+rsa.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+
+[lints]
+workspace = true

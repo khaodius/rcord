@@ -1,0 +1,85 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/khaodius/rcord"
+authors = ["khaodius"]
+publish = false
+
+[workspace.dependencies]
+rcord-auth = { path = "crates/rcord-auth" }
+rcord-gateway = { path = "crates/rcord-gateway" }
+rcord-markup = { path = "crates/rcord-markup" }
+rcord-model = { path = "crates/rcord-model" }
+rcord-rest = { path = "crates/rcord-rest" }
+rcord-settings = { path = "crates/rcord-settings" }
+rcord-store = { path = "crates/rcord-store" }
+rcord-voice = { path = "crates/rcord-voice" }
+
+anyhow = "1"
+async-channel = "2"
+base64 = "0.22"
+bitflags = "2"
+bytes = "1"
+directories = "6"
+flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
+futures = "0.3"
+gpui = "0.2.2"
+http = "1"
+keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
+parking_lot = "0.12"
+qrcode = { version = "0.14", default-features = false }
+rand = "0.9"
+rustc-hash = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli", "zstd", "http2", "charset"] }
+rsa = { version = "0.9", features = ["sha2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+smallvec = "1"
+thiserror = "2"
+time = { version = "0.3", features = ["parsing", "formatting", "local-offset", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net"] }
+tokio-tungstenite = { version = "0.27", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "allow"
+# View code builds elements with many inputs; splitting them only moves the noise.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
+panic = "abort"
+
+# libc no longer exports ENOATTR on Linux, which breaks xattr 0.2, an indirect dependency
+# of gpui through its tar reader. third_party/xattr is the published crate with that one
+# constant defined. Drop this once gpui moves to xattr 1.
+[patch.crates-io]
+xattr = { path = "third_party/xattr" }

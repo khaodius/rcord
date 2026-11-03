@@ -1,0 +1,134 @@
+name: Install scripts
+
+# Checks scripts/install.sh, install.ps1 and install.cmd. Once a release exists, also runs them on
+# clean machines the way the one-line commands in README.md run them.
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/**
+      - .github/workflows/install-scripts.yml
+  pull_request:
+    paths:
+      - scripts/**
+      - .github/workflows/install-scripts.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: ShellCheck
+        run: shellcheck scripts/install.sh
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $issues = Invoke-ScriptAnalyzer -Path scripts/install.ps1 -Severity Error, Warning -ExcludeRule PSAvoidUsingWriteHost
+          $issues | Format-Table -AutoSize
+          if ($issues) { throw "PSScriptAnalyzer found $($issues.Count) issue(s)" }
+
+      - name: install.cmd keeps CRLF line endings
+        run: |
+          if grep -q $'[^\r]$' scripts/install.cmd; then
+            echo "::error::scripts/install.cmd has lines without CRLF endings"
+            exit 1
+          fi
+
+  released:
+    name: Has a release
+    runs-on: ubuntu-24.04
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  linux:
+    name: Linux
+    needs: [lint, released]
+    if: needs.released.outputs.exists == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install for this user
+        run: |
+          cat scripts/install.sh | bash -s -- --user
+          test -x "$HOME/.local/bin/rcord"
+          grep -qx "Exec=\"$HOME/.local/bin/rcord\" %U" "$HOME/.local/share/applications/rcord.desktop"
+          test -f "$HOME/.local/share/icons/hicolor/128x128/apps/rcord.png"
+
+      - name: Install the .deb with apt
+        run: |
+          cat scripts/install.sh | bash
+          dpkg-query -W rcord
+          test -x /usr/bin/rcord
+
+      - name: Install the .rpm with dnf on Fedora
+        run: |
+          docker run --rm -v "$PWD/scripts:/scripts:ro" fedora:latest bash -c '
+            set -e
+            cat /scripts/install.sh | bash
+            rpm -q rcord
+            test -x /usr/bin/rcord
+          '
+
+      - name: Refuse a version that was never released
+        run: |
+          if cat scripts/install.sh | bash -s -- 0.0.1 --user; then
+            echo "::error::install.sh reported success for a missing release"
+            exit 1
+          fi
+
+  windows:
+    name: Windows
+    needs: [lint, released]
+    if: needs.released.outputs.exists == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install with install.ps1 in PowerShell 7
+        shell: pwsh
+        run: |
+          Get-Content -Raw scripts/install.ps1 | Invoke-Expression
+          $installed = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6B0E5C1A-3E2F-4D7B-9A51-8C2D4F6E1B37}_is1'
+          $binary = Join-Path $installed.InstallLocation 'rcord.exe'
+          if (-not (Test-Path $binary)) { throw "$binary is missing" }
+
+      - name: Reinstall with install.cmd
+        shell: cmd
+        run: |
+          copy scripts\install.cmd install.cmd
+          cmd /d /c "install.cmd && del install.cmd"
+          if exist install.cmd exit /b 1
+
+      - name: Refuse a version that was never released
+        shell: cmd
+        run: |
+          copy scripts\install.cmd install.cmd
+          cmd /d /c "install.cmd 0.0.1 && del install.cmd"
+          if not exist install.cmd exit /b 1
+          del install.cmd
+          powershell -NoProfile -Command "& ([scriptblock]::Create((Get-Content -Raw scripts/install.ps1))) 0.0.1"
+          if not errorlevel 1 exit /b 1
+          exit /b 0
