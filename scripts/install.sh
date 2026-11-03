@@ -96,7 +96,9 @@ install_user() {
   tar -xzf "$archive" -C "$workdir" || fail "could not unpack $(basename "$archive")"
   local unpacked
   unpacked=$(find "$workdir" -mindepth 1 -maxdepth 1 -type d -name 'rcord-*' | head -n 1)
-  [ -n "$unpacked" ] && [ -x "$unpacked/rcord" ] || fail "the archive has no rcord binary"
+  if [ -z "$unpacked" ] || [ ! -x "$unpacked/rcord" ]; then
+    fail "the archive has no rcord binary"
+  fi
 
   mkdir -p "$bin_directory" "$data_directory/applications" "$data_directory/icons"
   # A rename replaces the file even while rcord runs from it.

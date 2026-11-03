@@ -176,6 +176,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAG: ${{ needs.version.outputs.tag }}
+      PRIVATE: ${{ github.event.repository.private }}
     steps:
       - uses: actions/checkout@v5
 
@@ -208,7 +209,10 @@ jobs:
           mv "$RUNNER_TEMP/SHA256SUMS.txt" .
           cat SHA256SUMS.txt
 
+      # GitHub records attestations only for public repositories (and private ones on paid
+      # organization plans), so a private repository publishes without them.
       - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: release/*
@@ -258,17 +262,19 @@ jobs:
             echo "Get-FileHash .\\rcord-${VERSION}-x64-setup.exe -Algorithm SHA256"
             echo '```'
             echo
-            echo "Every file also carries a signed build provenance attestation, recorded in a public"
-            echo "transparency log, which proves it was built by this repository's release workflow from"
-            echo "the \`$TAG\` tag and not uploaded by hand. With the [GitHub CLI](https://cli.github.com):"
-            echo
-            echo '```sh'
-            echo "gh attestation verify rcord_${VERSION}_amd64.deb --repo $GITHUB_REPOSITORY"
-            echo '```'
-            echo
+            if [ "$PRIVATE" != true ]; then
+              echo "Every file also carries a signed build provenance attestation, recorded in a public"
+              echo "transparency log, which proves it was built by this repository's release workflow from"
+              echo "the \`$TAG\` tag and not uploaded by hand. With the [GitHub CLI](https://cli.github.com):"
+              echo
+              echo '```sh'
+              echo "gh attestation verify rcord_${VERSION}_amd64.deb --repo $GITHUB_REPOSITORY"
+              echo '```'
+              echo
+            fi
             echo "Checksums and attestations prove where a file came from and that it is unaltered; they"
             echo "are not a virus scan. Everything in the packages is built from the source at"
-            echo "[\`$TAG\`]($tree_url), in public, by [this workflow run]($run_url)."
+            echo "[\`$TAG\`]($tree_url) by [this workflow run]($run_url)."
             echo
             echo "The Windows builds are not code-signed yet, so SmartScreen may warn about an"
             echo "unknown publisher. Choose **More info** and then **Run anyway** once the checksum matches."
