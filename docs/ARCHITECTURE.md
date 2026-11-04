@@ -55,8 +55,11 @@ through channels and are applied between frames.
   keychain and read back at start.
 - **rcord-settings** holds every setting with defaults and clamps. Unknown or missing keys
   never fail a load, so a settings file from another version still opens; saves are atomic.
-- **rcord-voice** carries calls: the voice gateway (v8), DAVE end-to-end encryption, UDP media
-  with transport encryption, and the audio path between the devices and Opus. See below.
+- **rcord-voice** carries calls and Go Live streams: the voice gateway (v8), DAVE end-to-end
+  encryption, UDP media with transport encryption, the audio path between the devices and Opus,
+  and H.264 video. See below.
+- **rcord-capture** captures screens for Go Live: the ScreenCast desktop portal and PipeWire on
+  Wayland, xcap (XShm, DXGI desktop duplication) on X11 and Windows.
 - **rcord** is the application.
 
 ## The application
@@ -149,11 +152,51 @@ until both have arrived, then `rcord_voice::connect` starts it on the network ru
   served by PipeWire) is used when available, with ALSA as the fallback. A lost device is
   reopened every two seconds until it comes back; changing the device in Settings reopens it.
 
+## Go Live
+
+A stream is a second media connection, to a server of its own. Sharing starts with capture:
+`rcord_capture::Capture::start` on a Wayland session asks the ScreenCast portal, which shows the
+compositor's picker for a screen or window, then reads the PipeWire node the portal hands back
+(memory buffers in BGRx, BGRA, RGBx or RGBA, copied out row by row since rows may be padded).
+Nothing goes through XWayland. X11 and Windows list monitors and capture them with xcap. Once
+capture runs, `STREAM_CREATE` (op 18) goes out on the main gateway; watching sends
+`STREAM_WATCH` (op 20) for the key `guild:{guild}:{channel}:{user}` (or `call:{channel}:{user}`).
+Discord answers with the `STREAM_CREATE` dispatch, which carries the stream server's
+`rtc_server_id`, and `STREAM_SERVER_UPDATE` with its endpoint and token. `rcord_voice::
+connect_stream` then speaks the same voice protocol with these differences:
+
+- Identify sets `video: true` and one `screen` stream; Ready returns the video and RTX SSRCs;
+  Select Protocol lists Opus (120) and H.264 (101, RTX 102).
+- The DAVE group for a stream is the stream server ID minus one, as Discord's clients use.
+- A sender announces its stream with op 12 (SSRCs, frame rate, maximum resolution and bitrate)
+  and the soundshare speaking flag. A viewer learns the streamer's SSRCs from op 12.
+
+```
+ capture thread          rcord-video-encode           network runtime
+ ──────────────          ──────────────────           ───────────────
+ portal / PipeWire  ──▶  scale + BGRA→I420  ──▶       DAVE encrypt (H.264: NAL headers clear)
+ or xcap                 OpenH264 (screen content,    split NAL units, FU-A over 1200 bytes
+                         keyframe every 5 s or        playout-delay extension, 90 kHz clock
+                         when a viewer asks)          seal (AEAD) ──▶ UDP
+
+ main thread ◀── image ── rcord-video-decode ◀──      UDP ──▶ open ──▶ reassemble per SSRC
+ (stream panel)           OpenH264, I420→BGRA         (single NAL, STAP-A, FU-A) ──▶ DAVE decrypt
+```
+
+- **Frames never queue.** Capture to encoder and reassembly to decoder hold one frame (four
+  access units for the decoder); a busy stage skips frames rather than adding delay. A screen
+  that does not change produces no new frames on some systems, so the encoder repeats the last
+  one each second, which also gives late viewers a picture.
+- **Loss recovery.** A gap in sequence numbers drops the frame being reassembled, and the
+  viewer sends an RTCP picture loss indication to the streamer (at most once a second) until
+  a keyframe arrives. A sender that receives a PLI or FIR encodes the next frame as a keyframe.
+- **Display.** Decoded frames are BGRA, which is what GPUI's image textures hold. Each new frame
+  replaces the last as a `RenderImage`, and the old one is dropped from the GPU atlas.
+- **Sound.** A watched stream's Opus goes to the call's mixer, so it plays with the call.
+
 ### Still to build
 
 1. Push to talk with a global key, echo cancellation, per-user volume in the participant menu.
-2. Go Live: `STREAM_CREATE`/`STREAM_WATCH` on the main gateway, a second voice connection to
-   the stream server with video SSRCs, H.264 RTP packetization, then capture (PipeWire portal
-   on Wayland, XComposite or the portal on X11, Windows Graphics Capture) with hardware encoders
-   where available, and decoding into GPUI textures for watching.
+2. Stream sound when sharing, window capture on X11 and Windows (the portal already offers
+   windows on Wayland), and hardware encoders (VA-API, Media Foundation) where available.
 3. Camera video on the same path.

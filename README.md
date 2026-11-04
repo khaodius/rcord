@@ -77,14 +77,17 @@
   encryption (DAVE) with the call's privacy code, noise suppression (RNNoise), voice activity
   that adapts to the room or follows a fixed threshold, a jitter buffer per speaker with
   forward error correction for lost packets, and speaking rings in the channel list.
+- **Screen share (Go Live)**: share a screen into your voice channel at 720p or 1080p, 30 or 60
+  FPS, and watch other people's streams above the chat. Video is H.264 (OpenH264) with the
+  same end-to-end encryption as voice. On Wayland, capture is native: the desktop's own
+  sharing dialog picks a screen or window and frames come from PipeWire, with no XWayland
+  involved. X11 and Windows list your screens directly.
 
 - **Video player**: MP4 and MOV videos in chat play inside rcord, with H.264 decoded by
   OpenH264 and AAC sound by Symphonia, a seek bar, volume and keyboard controls.
 - **Window**: an optional slim title bar with minimize, maximize and close for desktops that
   draw none, close to tray on Linux and Windows, servers in your own order, and a Home button
   that shows the logo, the friends icon, your avatar or your own picture.
-
-Screen share is not available yet; see the [roadmap](#roadmap).
 
 ## Install
 
@@ -208,8 +211,8 @@ Every shortcut can be changed in Settings > Keybinds.
 
 - **Voice**: push to talk with a global key, echo cancellation, per-user volume in the
   participant menu, and an input level meter in Settings.
-- **Screen share (Go Live)** and camera video with hardware encoding where available, and
-  more video formats in the player (WebM, HEVC).
+- **Screen share**: stream sound, sharing a single window on X11 and Windows, and hardware
+  encoding where available. Camera video, and more formats in the player (WebM, HEVC).
 - **Composer**: multi-line messages, editing your last message with Up, file uploads, emoji and
   mention autocomplete.
 - **Threads and forums** as their own views, pinned messages, and message search.
@@ -220,18 +223,19 @@ Every shortcut can be changed in Settings > Keybinds.
 ## Build from source
 
 Requires [Rust](https://rustup.rs) 1.88+. On Linux, also the development packages for
-xkbcommon, Wayland, X11, fontconfig, Vulkan, WebKitGTK (for the captcha window) and ALSA, plus
-CMake, which builds the bundled Opus codec:
+xkbcommon, Wayland, X11, fontconfig, Vulkan, WebKitGTK (for the captcha window), ALSA and
+PipeWire (for screen capture on Wayland), plus CMake, which builds the bundled Opus codec, and
+Clang, which generates the PipeWire bindings:
 
 ```sh
 # Debian, Ubuntu
 sudo apt install pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
   libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libwebkit2gtk-4.1-dev \
-  libasound2-dev cmake
+  libasound2-dev libpipewire-0.3-dev libgbm-dev libclang-dev cmake
 # Fedora
 sudo dnf install pkg-config libxkbcommon-devel libxkbcommon-x11-devel wayland-devel \
   libxcb-devel fontconfig-devel freetype-devel vulkan-loader-devel webkit2gtk4.1-devel \
-  alsa-lib-devel cmake
+  alsa-lib-devel pipewire-devel mesa-libgbm-devel clang-devel cmake
 ```
 
 ```sh
@@ -263,8 +267,9 @@ The workspace is split so most of the client is tested without a window:
 | [`rcord-store`](crates/rcord-store)       | The cache that gateway events and API pages are applied to  |
 | [`rcord-markup`](crates/rcord-markup)     | The markdown parser                                         |
 | [`rcord-auth`](crates/rcord-auth)         | Password, two-factor and QR sign-in, keychain storage       |
+| [`rcord-capture`](crates/rcord-capture)   | Screen capture: Wayland portal and PipeWire, X11, Windows   |
 | [`rcord-settings`](crates/rcord-settings) | Settings, defaults and the TOML file                        |
-| [`rcord-voice`](crates/rcord-voice)       | Voice gateway, DAVE, RTP transport and the audio path       |
+| [`rcord-voice`](crates/rcord-voice)       | Voice and Go Live: gateway, DAVE, RTP, audio, H.264 video    |
 | [`rcord-webview`](crates/rcord-webview)   | The small Discord window for captchas and web sign-in       |
 
 `third_party/xattr` is xattr 0.2.3 with one constant changed so it builds against current libc on
