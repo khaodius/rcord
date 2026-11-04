@@ -3,12 +3,13 @@
 
 use gpui::{
     AnyElement, Context, Entity, Focusable, FontWeight, IntoElement, MouseButton, ObjectFit,
-    Render, Subscription, Window, anchored, deferred, div, img, point, prelude::*, px,
+    Render, Subscription, Window, anchored, deferred, div, point, prelude::*, px,
 };
 use rcord_model::{Emoji, Snowflake, StickerFormat, StickerItem, cdn};
 
 use crate::state::{AppState, ExpressionTab, Overlay, StateEvent};
 use crate::theme::theme;
+use crate::ui::anim_img;
 use crate::ui::chat::ChatView;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::profile::profile_card;
@@ -406,7 +407,7 @@ impl OverlayLayer {
                             .cursor_pointer()
                             .hover(|s| s.bg(t.hover))
                             .tooltip(move |_, cx| Tooltip::view(format!(":{name}:"), cx))
-                            .child(img(url).size_full().object_fit(ObjectFit::Contain))
+                            .child(anim_img(url).size_full().object_fit(ObjectFit::Contain))
                             .on_click(move |_, window, cx| {
                                 pick_emoji(&state, &chat, &emoji, react_to, window, cx)
                             }),
@@ -485,7 +486,7 @@ impl OverlayLayer {
                         .overflow_hidden()
                         .bg(t.hover)
                         .cursor_pointer()
-                        .child(img(src).size_full().object_fit(ObjectFit::Cover))
+                        .child(anim_img(src).size_full().object_fit(ObjectFit::Cover))
                         .on_click(move |_, _, cx| {
                             if let Some(c) = channel {
                                 state.update(cx, |s, cx| {
@@ -512,7 +513,11 @@ impl OverlayLayer {
                                 .rounded(t.radius_small)
                                 .overflow_hidden()
                                 .cursor_pointer()
-                                .child(img(c.src.clone()).size_full().object_fit(ObjectFit::Cover))
+                                .child(
+                                    anim_img(c.src.clone())
+                                        .size_full()
+                                        .object_fit(ObjectFit::Cover),
+                                )
                                 .child(
                                     div()
                                         .absolute()
@@ -588,7 +593,7 @@ impl OverlayLayer {
                         let id = st.id;
                         let name = st.name.clone();
                         let preview = match cdn::sticker(&st, 160) {
-                            Some(url) => img(url)
+                            Some(url) => anim_img(url)
                                 .size_full()
                                 .object_fit(ObjectFit::Contain)
                                 .into_any_element(),

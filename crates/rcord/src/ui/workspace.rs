@@ -11,8 +11,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyView, Bounds, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement, MouseButton,
-    Pixels, Point, Render, Subscription, Window, actions, canvas, div, prelude::*, px,
+    Animation, AnimationExt, AnyView, Bounds, Context, Entity, FocusHandle, Focusable, FontWeight,
+    IntoElement, MouseButton, Pixels, Point, Render, Subscription, TitlebarOptions, Window,
+    WindowBounds, WindowHandle, WindowOptions, actions, canvas, div, prelude::*, px, size,
 };
 use rcord_settings::PanelId;
 
@@ -20,8 +21,10 @@ use crate::state::{AppState, Overlay, SettingsPage, StateEvent};
 use crate::theme::theme;
 use crate::ui::channels::ChannelSidebar;
 use crate::ui::chat::ChatView;
+use crate::ui::icons::{Icon, icon};
 use crate::ui::members::MemberList;
 use crate::ui::overlays::OverlayLayer;
+use crate::ui::panel_window::PanelWindow;
 use crate::ui::servers::ServerRail;
 use crate::ui::settings::SettingsView;
 
@@ -86,6 +89,14 @@ const HOLD: Duration = Duration::from_millis(280);
 const HOLD_SLOP: f32 = 6.0;
 const SERVER_RAIL_WIDTH: f32 = 72.0;
 const HANDLE_WIDTH: f32 = 6.0;
+/// How long a panel takes to fold away when it pops out, and to open when it docks.
+const POP_OUT: Duration = Duration::from_millis(200);
+const DOCK_IN: Duration = Duration::from_millis(380);
+
+/// Panels that can live in their own window. Chat stays, so the main window is never empty.
+fn detachable(panel: PanelId) -> bool {
+    panel != PanelId::Chat
+}
 
 #[derive(Clone, Copy)]
 struct Hold {
@@ -126,6 +137,14 @@ pub struct Workspace {
     lift: Option<Lift>,
     resize: Option<Resize>,
     generation: u64,
+    /// Panels open in their own windows.
+    detached: HashMap<PanelId, WindowHandle<PanelWindow>>,
+    /// A panel folding away after popping out; its spot is drawn empty until it closes.
+    leaving: Option<PanelId>,
+    /// The panel that last docked, and a number that restarts its opening animation.
+    arriving: Option<(PanelId, u64)>,
+    /// Where the pop-out target was drawn while a panel is lifted.
+    pop_zone: Rc<RefCell<Option<Bounds<Pixels>>>>,
     _subs: Vec<Subscription>,
 }
 
@@ -180,6 +199,10 @@ impl Workspace {
             lift: None,
             resize: None,
             generation: 0,
+            detached: HashMap::new(),
+            leaving: None,
+            arriving: None,
+            pop_zone: Rc::default(),
             _subs: subs,
         }
     }
@@ -234,8 +257,30 @@ impl Workspace {
             .count()
     }
 
-    fn drop_panel(&mut self, cx: &mut Context<Self>) {
+    /// Whether letting go here pops the lifted panel out: over the target at the top, or
+    /// past the edge of the window.
+    fn over_pop_out(&self, lift: Lift, window: &Window) -> bool {
+        if !detachable(lift.panel) {
+            return false;
+        }
+        if self
+            .pop_zone
+            .borrow()
+            .is_some_and(|b| b.contains(&lift.cursor))
+        {
+            return true;
+        }
+        let size = window.viewport_size();
+        let p = lift.cursor;
+        p.x < px(0.) || p.y < px(0.) || p.x > size.width || p.y > size.height
+    }
+
+    fn drop_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(lift) = self.lift.take() else { return };
+        if self.over_pop_out(lift, window) {
+            self.pop_out(lift.panel, lift.cursor, window, cx);
+            return;
+        }
         let visible = self.visible(cx);
         let slot = self.drop_slot(lift, &visible);
         self.state.update(cx, |s, cx| {
@@ -276,7 +321,100 @@ impl Workspace {
             .copied()
             .filter(|p| layout.is_visible(*p))
             .filter(|p| *p != PanelId::Members || in_guild)
+            .filter(|p| !self.detached.contains_key(p) || self.leaving == Some(*p))
             .collect()
+    }
+
+    /// Moves `panel` into a window of its own, near where it was let go.
+    fn pop_out(
+        &mut self,
+        panel: PanelId,
+        cursor: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.detached.contains_key(&panel) {
+            return;
+        }
+        let width = match panel {
+            PanelId::Servers => 96.,
+            p => self.panel_width(p, cx).unwrap_or(260.) + 40.,
+        };
+        let main = window.bounds();
+        let height = f32::from(main.size.height).clamp(420., 900.);
+        let origin = main.origin
+            + gpui::point(
+                (cursor.x - px(width / 2.)).max(px(0.)),
+                (cursor.y - px(40.)).max(px(0.)),
+            );
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some(format!("rcord · {}", panel.label()).into()),
+                ..Default::default()
+            }),
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin,
+                size: size(px(width), px(height)),
+            })),
+            window_min_size: Some(size(px(72.), px(240.))),
+            app_id: Some("rcord".into()),
+            focus: true,
+            show: true,
+            ..Default::default()
+        };
+        let state = self.state.clone();
+        let view = self.detached_view(panel);
+        let workspace = cx.weak_entity();
+        match cx.open_window(options, move |window, cx| {
+            cx.new(|cx| PanelWindow::new(state, panel, view, workspace, window, cx))
+        }) {
+            Ok(handle) => {
+                self.detached.insert(panel, handle);
+                self.leaving = Some(panel);
+                if self.arriving.is_some_and(|(p, _)| p == panel) {
+                    self.arriving = None;
+                }
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(POP_OUT).await;
+                    this.update(cx, |this, cx| {
+                        if this.leaving == Some(panel) {
+                            this.leaving = None;
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            Err(e) => {
+                let message = format!("Could not open a window: {e}");
+                self.state.update(cx, |s, cx| s.toast(message, cx));
+            }
+        }
+        cx.notify();
+    }
+
+    /// Called by a popped-out window as it closes: the panel comes back to its spot.
+    pub fn docked(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        if self.detached.remove(&panel).is_none() {
+            return;
+        }
+        if self.leaving == Some(panel) {
+            self.leaving = None;
+        }
+        self.generation += 1;
+        self.arriving = Some((panel, self.generation));
+        cx.notify();
+    }
+
+    fn detached_view(&self, panel: PanelId) -> AnyView {
+        let full = gpui::StyleRefinement::default().size_full();
+        match panel {
+            PanelId::Servers => AnyView::from(self.servers.clone()).cached(full),
+            PanelId::Channels => AnyView::from(self.channels.clone()).cached(full),
+            PanelId::Chat => self.chat.clone().into(),
+            PanelId::Members => AnyView::from(self.members.clone()).cached(full),
+        }
     }
 
     fn panel_width(&self, panel: PanelId, cx: &gpui::App) -> Option<f32> {
@@ -417,8 +555,9 @@ impl Focusable for Workspace {
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
+        let pop_target = self.lift.is_some_and(|l| self.over_pop_out(l, window));
         let visible = self.visible(cx);
         let s = self.state.read(cx);
         let settings_page = match s.overlay {
@@ -428,7 +567,18 @@ impl Render for Workspace {
         let borders = s.settings.appearance.panel_borders;
         let reduced_motion = s.settings.accessibility.reduced_motion;
         let lift = self.lift;
-        let slot = lift.map(|l| self.drop_slot(l, &visible));
+        let over_home = lift.is_some_and(|l| {
+            self.bounds
+                .borrow()
+                .get(&l.panel)
+                .is_some_and(|b| b.contains(&l.cursor))
+        });
+        // Over its own spot the panel just goes back, so no insertion line is drawn.
+        let slot = lift
+            .filter(|_| !over_home && !pop_target)
+            .map(|l| self.drop_slot(l, &visible));
+        let leaving = self.leaving;
+        let arriving = self.arriving;
 
         let chat_ix = visible
             .iter()
@@ -460,22 +610,25 @@ impl Render for Workspace {
                 row = row.child(self.resize_handle(panel, -1., cx));
             }
             let bounds = self.bounds.clone();
+            let is_leaving = leaving == Some(panel);
             let mut cell = div()
                 .relative()
                 .h_full()
                 .min_w_0()
                 .overflow_hidden()
-                .child(self.view(panel))
-                .child(
-                    canvas(
-                        move |b, _, _| {
-                            bounds.borrow_mut().insert(panel, b);
-                        },
-                        |_, _, _, _| {},
+                .when(!is_leaving, |el| {
+                    el.child(self.view(panel)).child(
+                        canvas(
+                            move |b, _, _| {
+                                bounds.borrow_mut().insert(panel, b);
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .inset_0(),
                     )
-                    .absolute()
-                    .inset_0(),
-                );
+                })
+                .when(is_leaving, |el| el.bg(t.sidebar));
             cell = match width {
                 Some(w) => cell.flex_none().w(px(w)),
                 None => cell.flex_1(),
@@ -484,15 +637,56 @@ impl Render for Workspace {
                 cell = cell.border_r_1().border_color(t.border);
             }
             if lifted {
-                cell = cell.opacity(if reduced_motion { 0.7 } else { 0.55 }).child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .border_2()
-                        .border_color(t.accent)
-                        .rounded(t.radius_small),
-                );
+                // The outline marks the panel's own spot only while the pointer is over it,
+                // where letting go puts the panel back; elsewhere the drop indicator leads.
+                let home = over_home;
+                cell = cell
+                    .opacity(if reduced_motion { 0.7 } else { 0.55 })
+                    .when(home, |el| {
+                        el.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .border_2()
+                                .border_color(t.accent)
+                                .rounded(t.radius_small),
+                        )
+                    });
             }
+            let full = width.unwrap_or(240.);
+            let cell = match (is_leaving, arriving.filter(|(p, _)| *p == panel)) {
+                // Popping out: the emptied spot folds shut.
+                (true, _) if !reduced_motion => cell
+                    .with_animation(
+                        gpui::ElementId::NamedInteger("leaving".into(), panel as u64),
+                        Animation::new(POP_OUT).with_easing(gpui::ease_in_out),
+                        move |el, d| el.w(px(full * (1. - d))).opacity(1. - d),
+                    )
+                    .into_any_element(),
+                // Docking: the panel opens from nothing, fades in, and its outline glows
+                // then fades so the eye lands on where it went.
+                (false, Some((_, generation))) if !reduced_motion => cell
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .border_2()
+                            .border_color(t.accent)
+                            .rounded(t.radius_small)
+                            .with_animation(
+                                gpui::ElementId::NamedInteger("dock-glow".into(), generation),
+                                Animation::new(DOCK_IN * 2).with_easing(gpui::ease_in_out),
+                                |el, d| el.opacity(1. - d),
+                            ),
+                    )
+                    .with_animation(
+                        gpui::ElementId::NamedInteger("docking".into(), generation),
+                        Animation::new(DOCK_IN).with_easing(gpui::ease_out_quint()),
+                        move |el, d| el.w(px(full * d)).opacity(0.3 + 0.7 * d),
+                    )
+                    .into_any_element(),
+                _ => cell.into_any_element(),
+            };
             row = row.child(cell);
             if resizable && ix < chat_ix {
                 row = row.child(self.resize_handle(panel, 1., cx));
@@ -511,7 +705,7 @@ impl Render for Workspace {
             .size_full()
             .bg(t.base)
             .text_color(t.text)
-            .font_family("Inter")
+            .font_family(theme(cx).ui_font.clone())
             .on_action(cx.listener(|this, _: &QuickSwitcher, _, cx| {
                 this.state.update(cx, |s, cx| {
                     let open = matches!(s.overlay, Some(Overlay::QuickSwitcher));
@@ -598,12 +792,12 @@ impl Render for Workspace {
                     cx.notify();
                 }
             }))
-            .capture_any_mouse_up(cx.listener(
-                |this, e: &gpui::MouseUpEvent, _, cx| match e.button {
+            .capture_any_mouse_up(cx.listener(|this, e: &gpui::MouseUpEvent, window, cx| {
+                match e.button {
                     MouseButton::Right => {
                         this.hold = None;
                         if this.lift.is_some() {
-                            this.drop_panel(cx);
+                            this.drop_panel(window, cx);
                             // The release ends the move; it must not also open a context menu.
                             cx.stop_propagation();
                         }
@@ -613,8 +807,8 @@ impl Render for Workspace {
                         cx.stop_propagation();
                     }
                     _ => {}
-                },
-            ))
+                }
+            }))
             .on_mouse_move(
                 cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| this.on_mouse_move(e, cx)),
             )
@@ -622,6 +816,56 @@ impl Render for Workspace {
             .when(lift.is_some(), |el| el.cursor_grabbing())
             .child(row);
 
+        if let Some(l) = lift.filter(|l| detachable(l.panel)) {
+            let zone = self.pop_zone.clone();
+            root = root.child(
+                div()
+                    .absolute()
+                    .top(px(12.))
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .relative()
+                            .px(px(16.))
+                            .h(px(40.))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .rounded_full()
+                            .border_2()
+                            .border_color(if pop_target { t.accent } else { t.border })
+                            .bg(if pop_target { t.accent } else { t.floating })
+                            .text_color(if pop_target {
+                                t.accent_text
+                            } else {
+                                t.text_muted
+                            })
+                            .shadow_md()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(icon(Icon::Screen).size(px(18.)))
+                            .child(format!(
+                                "Drop here to open the {} in its own window",
+                                l.panel.label().to_lowercase()
+                            ))
+                            .child(
+                                canvas(
+                                    move |b, _, _| {
+                                        *zone.borrow_mut() = Some(b);
+                                    },
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .inset_0(),
+                            ),
+                    ),
+            );
+        } else {
+            *self.pop_zone.borrow_mut() = None;
+        }
         if let Some(l) = lift {
             root = root.child(
                 div()

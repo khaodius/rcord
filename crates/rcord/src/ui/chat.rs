@@ -6,7 +6,7 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, ElementId, Entity, FocusHandle, Focusable, FontWeight,
     Hsla, IntoElement, ListAlignment, ListState, ObjectFit, Pixels, Render, SharedString,
-    Subscription, Window, div, img, list, prelude::*, px,
+    Subscription, Window, div, list, prelude::*, px,
 };
 use rcord_markup::Block;
 use rcord_model::{
@@ -18,6 +18,7 @@ use rcord_store::Change;
 use crate::LocalTime;
 use crate::state::{AppState, ExpressionTab, MenuItem, Overlay, ReplyTo, StateEvent, now_ms};
 use crate::theme::{Theme, theme};
+use crate::ui::anim_img;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::markup::{self, MarkupAction, MarkupCx};
 use crate::ui::text_input::{InputEvent, TextInput};
@@ -45,6 +46,7 @@ pub struct ChatView {
     rows: Rc<Vec<Row>>,
     list: ListState,
     composer: Entity<TextInput>,
+    friends: Entity<crate::ui::friends::FriendsView>,
     revealed: Rc<std::cell::RefCell<HashSet<Snowflake>>>,
     focus: FocusHandle,
     _subs: Vec<Subscription>,
@@ -106,8 +108,10 @@ impl ChatView {
             }),
         );
         let list = ListState::new(0, ListAlignment::Bottom, px(800.));
+        let friends = cx.new(|cx| crate::ui::friends::FriendsView::new(state.clone(), window, cx));
         let mut this = Self {
             state,
+            friends,
             channel: None,
             rows: Rc::new(Vec::new()),
             list,
@@ -188,6 +192,24 @@ impl ChatView {
             self.list.reset(rows.len());
         } else if *self.rows != rows {
             let old = &self.rows;
+            let first_message = |rows: &[Row]| {
+                rows.iter().find_map(|r| match r {
+                    Row::Message { id, .. } => Some(*id),
+                    _ => None,
+                })
+            };
+            // When older history arrives above, the list would stay pinned to the loading row
+            // at the top and the new page would appear below it. Remember the message the
+            // view starts at, so it can stay put while the page lands above it.
+            let top = self.list.logical_scroll_top();
+            let prepended = first_message(old) != first_message(&rows);
+            let anchor = old.get(top.item_ix..).and_then(|rest| {
+                rest.iter().find_map(|r| match r {
+                    Row::Message { id, .. } => Some(*id),
+                    _ => None,
+                })
+            });
+            let keep_offset = matches!(old.get(top.item_ix), Some(Row::Message { .. }));
             let prefix = old.iter().zip(&rows).take_while(|(a, b)| a == b).count();
             let suffix = old
                 .iter()
@@ -199,6 +221,21 @@ impl ChatView {
                 .min(rows.len() - prefix);
             self.list
                 .splice(prefix..old.len() - suffix, rows.len() - suffix - prefix);
+            if prepended
+                && let Some(anchor) = anchor
+                && let Some(ix) = rows
+                    .iter()
+                    .position(|r| matches!(r, Row::Message { id, .. } if *id == anchor))
+            {
+                self.list.scroll_to(gpui::ListOffset {
+                    item_ix: ix,
+                    offset_in_item: if keep_offset {
+                        top.offset_in_item
+                    } else {
+                        px(0.)
+                    },
+                });
+            }
         }
         self.rows = Rc::new(rows);
         cx.notify();
@@ -737,7 +774,7 @@ fn render_message(
         hour24: settings.appearance.hour24,
         utc_offset: offset,
         now_secs: (now_ms() / 1000) as i64,
-        code_font: "JetBrains Mono".into(),
+        code_font: theme(cx).code_font.clone(),
         key: id.get(),
         on_action,
     };
@@ -820,7 +857,7 @@ fn render_message(
             let state = rcx.state.clone();
             let channel = rcx.channel;
             let emoji_el = match cdn::emoji(&r.emoji, 32) {
-                Some(url) => img(url)
+                Some(url) => anim_img(url)
                     .size(px(16.))
                     .object_fit(ObjectFit::Contain)
                     .into_any_element(),
@@ -1259,6 +1296,9 @@ fn attachment(a: &Attachment, max_h: f32, t: &Theme, message: Snowflake) -> AnyE
                 (f32::from(w) * 2.) as u32,
                 (f32::from(h) * 2.) as u32,
             )
+        } else if a.filename.to_ascii_lowercase().ends_with(".gif") {
+            // The media proxy's resized copy of a GIF is a still image; the original plays.
+            a.url.clone()
         } else {
             cdn::sized_proxy_url(
                 &base,
@@ -1281,7 +1321,7 @@ fn attachment(a: &Attachment, max_h: f32, t: &Theme, message: Snowflake) -> AnyE
             .bg(t.hover)
             .cursor_pointer()
             .child(
-                img(src)
+                anim_img(src)
                     .w(w)
                     .h(h)
                     .object_fit(ObjectFit::Cover)
@@ -1366,6 +1406,12 @@ pub fn human_size(bytes: u64) -> String {
 /// the same ID with the GIF format code, which GPUI can animate.
 fn tenor_gif(e: &Embed) -> Option<String> {
     let video = e.video.as_ref()?.url.as_deref()?;
+    // Giphy keeps the GIF beside the MP4: .../media/<id>/giphy.mp4 and .../giphy.gif.
+    if video.contains("giphy.com/media/")
+        && let Some(base) = video.strip_suffix(".mp4")
+    {
+        return Some(format!("{base}.gif"));
+    }
     let rest = video.strip_prefix("https://media.tenor.com/")?;
     let (id, name) = rest.split_once('/')?;
     // The last four characters of the ID name the format: AAPo is MP4, AAAC is GIF.
@@ -1394,7 +1440,7 @@ fn embed(e: &Embed, mcx: &MarkupCx<'_>, max_h: f32, index: usize) -> AnyElement 
             .rounded(t.radius)
             .overflow_hidden()
             .bg(t.hover)
-            .child(img(src).w(w).h(h).object_fit(ObjectFit::Cover))
+            .child(anim_img(src).w(w).h(h).object_fit(ObjectFit::Cover))
             .into_any_element();
     }
     let accent = e.color.map_or(t.border, |c| gpui::rgb(c).into());
@@ -1412,7 +1458,7 @@ fn embed(e: &Embed, mcx: &MarkupCx<'_>, max_h: f32, index: usize) -> AnyElement 
                 .gap(px(6.))
                 .when_some(
                     a.proxy_icon_url.clone().or(a.icon_url.clone()),
-                    |el, url| el.child(img(url).size(px(20.)).rounded_full()),
+                    |el, url| el.child(anim_img(url).size(px(20.)).rounded_full()),
                 )
                 .child(
                     div()
@@ -1484,7 +1530,7 @@ fn embed(e: &Embed, mcx: &MarkupCx<'_>, max_h: f32, index: usize) -> AnyElement 
             max_h,
         );
         body = body.child(
-            img(cdn::sized_proxy_url(
+            anim_img(cdn::sized_proxy_url(
                 &src,
                 (f32::from(w) * 2.) as u32,
                 (f32::from(h) * 2.) as u32,
@@ -1509,7 +1555,7 @@ fn embed(e: &Embed, mcx: &MarkupCx<'_>, max_h: f32, index: usize) -> AnyElement 
         .filter(|_| e.image.is_none())
         .and_then(|th| th.proxy_url.clone().or(th.url.clone()))
         .map(|src| {
-            img(src)
+            anim_img(src)
                 .size(px(80.))
                 .rounded(t.radius_small)
                 .object_fit(ObjectFit::Cover)
@@ -1540,7 +1586,7 @@ fn embed(e: &Embed, mcx: &MarkupCx<'_>, max_h: f32, index: usize) -> AnyElement 
 fn sticker(st: &rcord_model::StickerItem, t: &Theme, autoplay: bool) -> AnyElement {
     let _ = autoplay;
     match cdn::sticker(st, 320) {
-        Some(url) => img(url)
+        Some(url) => anim_img(url)
             .size(px(160.))
             .object_fit(ObjectFit::Contain)
             .into_any_element(),
@@ -1580,6 +1626,9 @@ impl Render for ChatView {
         let has_channel = self.state.read(cx).channel.is_some();
         if !has_channel {
             let home = self.state.read(cx).guild.is_none();
+            if home {
+                return self.friends.clone().into_any_element();
+            }
             return div()
                 .size_full()
                 .bg(t.surface)

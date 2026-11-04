@@ -289,9 +289,14 @@ impl ChannelSidebar {
 
     fn dm_list(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let t = theme(cx).clone();
+        let home_state = self.state.clone();
         let s = self.state.read(cx);
         let mut out = vec![
             div()
+                .id("friends-home")
+                .cursor_pointer()
+                .hover(|st| st.bg(t.hover))
+                .on_click(move |_, _, cx| home_state.update(cx, |s, cx| s.show_friends(cx)))
                 .mx(px(8.))
                 .px(px(8.))
                 .h(px(42.))

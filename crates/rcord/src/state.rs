@@ -136,6 +136,8 @@ pub struct AppState {
     pub toasts: Vec<Toast>,
     pub reply: Option<ReplyTo>,
     pub loading_history: HashSet<Snowflake>,
+    /// Channels whose history is kept in memory, most recently opened first.
+    recent_channels: std::collections::VecDeque<Snowflake>,
     pub self_mute: bool,
     pub self_deaf: bool,
     pub status: Status,
@@ -197,6 +199,7 @@ impl AppState {
             toasts: Vec::new(),
             reply: None,
             loading_history: HashSet::new(),
+            recent_channels: std::collections::VecDeque::new(),
             self_mute: false,
             self_deaf: false,
             status: Status::Online,
@@ -265,6 +268,10 @@ impl AppState {
         // `RCORD_DEMO=settings` opens straight onto the appearance settings.
         if std::env::var("RCORD_DEMO").is_ok_and(|v| v == "settings") {
             self.set_overlay(Some(Overlay::Settings(SettingsPage::Appearance)), cx);
+        }
+        // `RCORD_DEMO=friends` opens on the friends page.
+        if std::env::var("RCORD_DEMO").is_ok_and(|v| v == "friends") {
+            self.show_friends(cx);
         }
     }
 
@@ -424,7 +431,12 @@ impl AppState {
         match event {
             NetEvent::Update(update) => {
                 let is_ready = matches!(*update, Update::Ready(_));
+                let big = is_ready || matches!(*update, Update::ReadySupplemental(_));
                 let change = self.store.apply(*update, now_ms());
+                if big {
+                    // Parsing READY leaves tens of megabytes of freed heap behind.
+                    crate::memory::trim_soon();
+                }
                 if is_ready {
                     self.connection = Connection::Connected;
                     self.subscribed.clear();
@@ -548,6 +560,7 @@ impl AppState {
         self.guild = c.guild_id;
         self.channel = Some(channel);
         self.last_channel.insert(self.guild, channel);
+        self.remember_recent(channel);
         self.reply = None;
         self.ensure_history(channel, cx);
         self.subscribe_current();
@@ -639,11 +652,11 @@ impl AppState {
         else {
             return;
         };
-        let block = upto / 100;
-        let ranges: Vec<[u32; 2]> = (block.saturating_sub(1)..=block + 1)
-            .take(3)
-            .map(|b| [b * 100, b * 100 + 99])
-            .collect();
+        // The first hundred stay subscribed, as in Discord's client: dropping them makes Discord
+        // invalidate the top of the list, which then shows blank until it is asked for again.
+        let block = (upto / 100).max(1);
+        let mut ranges: Vec<[u32; 2]> = vec![[0, 99]];
+        ranges.extend((block..=block + 1).map(|b| [b * 100, b * 100 + 99]));
         let mut sub = GuildSubscription {
             typing: true,
             activities: true,
@@ -724,6 +737,119 @@ impl AppState {
             cx.global::<Net>()
                 .spawn(async move { rest.ack(channel, last).await });
         }
+    }
+
+    /// Keeps the history of the last few channels and drops the rest, which is most of
+    /// what grows while the app sits open. A dropped channel loads again when reopened.
+    fn remember_recent(&mut self, channel: Snowflake) {
+        const KEEP: usize = 8;
+        self.recent_channels.retain(|c| *c != channel);
+        self.recent_channels.push_front(channel);
+        while self.recent_channels.len() > KEEP {
+            if let Some(old) = self.recent_channels.pop_back()
+                && !self.loading_history.contains(&old)
+            {
+                self.store.forget_messages(old);
+            }
+        }
+    }
+
+    /// Shows the friends page: Home with no conversation open.
+    pub fn show_friends(&mut self, cx: &mut Context<Self>) {
+        self.guild = None;
+        self.channel = None;
+        self.last_channel.remove(&None);
+        self.reply = None;
+        self.subscribe_current();
+        cx.emit(StateEvent::Selection);
+        cx.notify();
+    }
+
+    /// Opens the DM with `user`, creating it when there is none yet.
+    pub fn open_dm(&mut self, user: Snowflake, cx: &mut Context<Self>) {
+        let existing = self
+            .store
+            .private_channels()
+            .find(|c| {
+                c.kind == rcord_model::ChannelKind::Dm && c.recipient_ids().any(|r| r == user)
+            })
+            .map(|c| c.id);
+        if let Some(id) = existing {
+            self.select_channel(id, cx);
+            return;
+        }
+        let Some(rest) = cx.global::<Net>().rest() else {
+            return;
+        };
+        let task = cx
+            .global::<Net>()
+            .run(async move { rest.create_dm(user).await });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |s, cx| match result {
+                Some(Ok(channel)) => {
+                    let id = channel.id;
+                    let change = s
+                        .store
+                        .apply(Update::ChannelCreate(Box::new(channel)), now_ms());
+                    cx.emit(StateEvent::Store(change));
+                    s.select_channel(id, cx);
+                }
+                Some(Err(e)) => s.toast(format!("Could not open the DM: {e}"), cx),
+                None => {}
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Accepts a friend request, removes a friend, ignores or cancels a request, or
+    /// unblocks. The gateway's RELATIONSHIP_* event updates the list afterwards.
+    pub fn set_friend(&mut self, user: Snowflake, add: bool, cx: &mut Context<Self>) {
+        let Some(rest) = cx.global::<Net>().rest() else {
+            return;
+        };
+        let task = cx.global::<Net>().run(async move {
+            if add {
+                rest.add_friend(user).await
+            } else {
+                rest.remove_relationship(user).await
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            if let Some(Err(e)) = task.await {
+                this.update(cx, |s, cx| {
+                    s.toast(format!("Could not update the friend: {e}"), cx)
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Sends a friend request by username and reports the result to `done`.
+    pub fn send_friend_request(
+        &mut self,
+        username: String,
+        cx: &mut Context<Self>,
+        done: impl FnOnce(Result<(), String>, &mut App) + 'static,
+    ) {
+        let Some(rest) = cx.global::<Net>().rest() else {
+            done(Err("Not signed in.".into()), cx);
+            return;
+        };
+        let task = cx
+            .global::<Net>()
+            .run(async move { rest.send_friend_request(&username).await });
+        cx.spawn(async move |_, cx| {
+            let result = match task.await {
+                Some(Ok(())) => Ok(()),
+                Some(Err(e)) => Err(e.to_string()),
+                None => Err("Cancelled.".into()),
+            };
+            cx.update(|cx| done(result, cx)).ok();
+        })
+        .detach();
     }
 
     pub fn mark_guild_read(&mut self, guild: Snowflake, cx: &mut Context<Self>) {

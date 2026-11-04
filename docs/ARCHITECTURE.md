@@ -80,6 +80,13 @@ the unread markers in the sidebar, and nothing else.
   the panel lifts. The release drops it at the nearest gap and is consumed, so the panel
   underneath never sees it as a context-menu click. A quick right click passes through
   untouched.
+- **Pop-out windows** take the panel's view entity, unchanged, into a second GPUI window
+  (`ui/panel_window.rs`); the panel views do not hold on to a window, so they draw in either.
+  That window shares the main window's image cache through a global. Docking removes the
+  window and the workspace animates the panel's width and outline back in.
+- **Memory**: only the last eight channels opened keep their history; older ones load again
+  when reopened. On Linux with glibc the allocator is held to two arenas and trimmed after
+  READY and once a minute (`memory.rs`), since freed heap otherwise stays resident.
 - **Settings** apply through one `update_settings` call that sanitizes, rebuilds the theme
   global, refreshes the window and schedules a save 400 ms later, so dragging a slider writes
   the file once.

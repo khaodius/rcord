@@ -114,7 +114,6 @@ jobs:
           for size in 32 64 128 256 512; do
             install -D -m 644 "assets/icons/rcord-$size.png" "$root/share/icons/hicolor/${size}x${size}/apps/rcord.png"
           done
-          install -D -m 644 assets/rcord.svg "$root/share/icons/hicolor/scalable/apps/rcord.svg"
           install -m 644 LICENSE README.md CHANGELOG.md "$root/"
           tar -czf "dist/$root.tar.gz" "$root"
           ls -l dist

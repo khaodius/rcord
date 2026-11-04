@@ -39,6 +39,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 unicode-segmentation = "1.12"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 
@@ -64,7 +67,6 @@ assets = [
     ["../../assets/icons/rcord-128.png", "usr/share/icons/hicolor/128x128/apps/rcord.png", "644"],
     ["../../assets/icons/rcord-256.png", "usr/share/icons/hicolor/256x256/apps/rcord.png", "644"],
     ["../../assets/icons/rcord-512.png", "usr/share/icons/hicolor/512x512/apps/rcord.png", "644"],
-    ["../../assets/rcord.svg", "usr/share/icons/hicolor/scalable/apps/rcord.svg", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -80,6 +82,5 @@ assets = [
     { source = "assets/icons/rcord-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/rcord.png", mode = "644" },
     { source = "assets/icons/rcord-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/rcord.png", mode = "644" },
     { source = "assets/icons/rcord-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/rcord.png", mode = "644" },
-    { source = "assets/rcord.svg", dest = "/usr/share/icons/hicolor/scalable/apps/rcord.svg", mode = "644" },
 ]
 auto-req = "auto"

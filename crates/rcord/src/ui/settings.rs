@@ -10,8 +10,8 @@ use gpui::{
     Subscription, Window, canvas, div, prelude::*, px,
 };
 use rcord_settings::{
-    Animate, Encoder, InputMode, Keybinds, MessageDisplay, NoiseSuppression, PanelId, RoleColors,
-    Settings, Spoilers, ThemeId,
+    Animate, COLOR_KEYS, Encoder, InputMode, Keybinds, MessageDisplay, NoiseSuppression, PanelId,
+    RoleColors, Settings, Spoilers, ThemeFile, ThemeId,
 };
 
 use crate::state::{AppState, Overlay, SettingsPage, StateEvent};
@@ -67,6 +67,12 @@ const KEYBIND_LABELS: [(&str, &str); 17] = [
     ("reset-layout", "Reset panel layout"),
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FontField {
+    Ui,
+    Code,
+}
+
 pub struct SettingsView {
     state: Entity<AppState>,
     focus: FocusHandle,
@@ -75,6 +81,15 @@ pub struct SettingsView {
     ui_font_input: Entity<TextInput>,
     code_font_input: Entity<TextInput>,
     build_input: Entity<TextInput>,
+    /// The installed font families, read the first time the font list opens.
+    fonts: Option<Rc<Vec<String>>>,
+    /// Which font field's suggestions are showing.
+    font_picker: Option<FontField>,
+    theme_name_input: Entity<TextInput>,
+    /// One hex field per themeable color, in [`COLOR_KEYS`] order.
+    theme_inputs: Vec<Entity<TextInput>>,
+    /// Theme files in the themes folder.
+    installed_themes: Rc<Vec<(std::path::PathBuf, ThemeFile)>>,
     recording: Option<String>,
     revealed_email: bool,
     _subs: Vec<Subscription>,
@@ -131,21 +146,41 @@ impl SettingsView {
             }),
         );
         subs.push(
-            cx.subscribe_in(&ui_font_input, window, |this, input, e, _, cx| {
-                if matches!(e, InputEvent::Submit) {
+            cx.subscribe_in(&ui_font_input, window, |this, input, e, _, cx| match e {
+                InputEvent::Submit => {
                     let v = input.read(cx).text().trim().to_owned();
+                    this.font_picker = None;
                     this.update(cx, |s| s.appearance.ui_font = (!v.is_empty()).then_some(v));
                 }
+                InputEvent::Changed => {
+                    this.font_picker = Some(FontField::Ui);
+                    cx.notify();
+                }
+                InputEvent::Cancel => {
+                    this.font_picker = None;
+                    cx.notify();
+                }
+                InputEvent::UpInEmpty => {}
             }),
         );
         subs.push(
-            cx.subscribe_in(&code_font_input, window, |this, input, e, _, cx| {
-                if matches!(e, InputEvent::Submit) {
+            cx.subscribe_in(&code_font_input, window, |this, input, e, _, cx| match e {
+                InputEvent::Submit => {
                     let v = input.read(cx).text().trim().to_owned();
+                    this.font_picker = None;
                     this.update(cx, |s| {
                         s.appearance.code_font = (!v.is_empty()).then_some(v)
                     });
                 }
+                InputEvent::Changed => {
+                    this.font_picker = Some(FontField::Code);
+                    cx.notify();
+                }
+                InputEvent::Cancel => {
+                    this.font_picker = None;
+                    cx.notify();
+                }
+                InputEvent::UpInEmpty => {}
             }),
         );
         subs.push(
@@ -157,9 +192,62 @@ impl SettingsView {
                 }
             }),
         );
+        let custom = s.appearance.custom_theme.clone().unwrap_or_default();
+        let theme_name_input = cx.new(|cx| {
+            let mut i = TextInput::new("Theme name", cx);
+            i.set_text(custom.name.clone(), cx);
+            i
+        });
+        subs.push(
+            cx.subscribe_in(&theme_name_input, window, |this, input, e, _, cx| {
+                if matches!(e, InputEvent::Changed | InputEvent::Submit) {
+                    let name = input.read(cx).text().to_owned();
+                    this.update(cx, |s| {
+                        if let Some(theme) = &mut s.appearance.custom_theme {
+                            theme.name = name;
+                        }
+                    });
+                }
+            }),
+        );
+        let mut theme_inputs = Vec::with_capacity(COLOR_KEYS.len());
+        for key in COLOR_KEYS {
+            let key = key.key;
+            let input = cx.new(|cx| {
+                let mut i = TextInput::new("#rrggbb", cx);
+                i.set_text(custom.colors.get(key).cloned().unwrap_or_default(), cx);
+                i
+            });
+            subs.push(
+                cx.subscribe_in(&input, window, move |this, input, e, _, cx| {
+                    if matches!(e, InputEvent::Changed | InputEvent::Submit) {
+                        let text = input.read(cx).text().trim().to_owned();
+                        let valid = rcord_settings::parse_color(&text).is_some();
+                        if text.is_empty() || valid {
+                            this.update(cx, |s| {
+                                if let Some(theme) = &mut s.appearance.custom_theme {
+                                    if text.is_empty() {
+                                        theme.colors.remove(key);
+                                    } else {
+                                        theme.colors.insert(key.to_owned(), text);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }),
+            );
+            theme_inputs.push(input);
+        }
+        let installed_themes = Rc::new(scan_themes(state.read(cx).paths.as_ref()));
         Self {
             state,
             focus: cx.focus_handle(),
+            fonts: None,
+            font_picker: None,
+            theme_name_input,
+            theme_inputs,
+            installed_themes,
             scroll: ScrollHandle::new(),
             accent_input,
             ui_font_input,
@@ -394,13 +482,21 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let current = s.appearance.theme;
-        let mut themes = div().flex().gap(px(12.));
-        for id in ThemeId::ALL {
+        let mut themes = div().flex().gap(px(16.));
+        let mut choices: Vec<ThemeId> = ThemeId::ALL.to_vec();
+        if s.appearance.custom_theme.is_some() {
+            choices.push(ThemeId::Custom);
+        }
+        for id in choices {
             let preview = Theme::from_settings(&rcord_settings::Appearance {
                 theme: id,
                 ..s.appearance.clone()
             });
             let selected = id == current;
+            let label: SharedString = match (id, &s.appearance.custom_theme) {
+                (ThemeId::Custom, Some(c)) => c.name.clone().into(),
+                _ => id.label().into(),
+            };
             themes = themes.child(
                 div()
                     .id(ElementId::Name(format!("theme-{}", id.label()).into()))
@@ -412,37 +508,14 @@ impl SettingsView {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.update(cx, |s| s.appearance.theme = id)
                     }))
+                    .child(theme_sphere(&preview, selected, t))
                     .child(
                         div()
-                            .size(px(64.))
-                            .rounded_full()
-                            .border_2()
-                            .border_color(if selected { t.accent } else { t.border })
-                            .overflow_hidden()
-                            .flex()
-                            .child(div().w(px(20.)).h_full().bg(preview.sidebar))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .h_full()
-                                    .bg(preview.base)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .when(selected, |el| {
-                                        el.child(
-                                            icon(Icon::Check)
-                                                .size(px(18.))
-                                                .text_color(preview.accent),
-                                        )
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div()
+                            .max_w(px(72.))
+                            .truncate()
                             .text_xs()
                             .text_color(if selected { t.header } else { t.text_muted })
-                            .child(id.label()),
+                            .child(label),
                     ),
             );
         }
@@ -467,11 +540,13 @@ impl SettingsView {
         }
         swatches = swatches.child(div().w(px(110.)).child(self.accent_input.clone()));
 
-        vec![
+        let mut out = vec![
             heading("Theme", t),
             themes.into_any_element(),
             heading("Accent color", t),
             swatches.into_any_element(),
+            heading("Preview", t),
+            message_preview(s, t),
             heading("Scaling", t),
             self.slider(
                 "Interface zoom",
@@ -596,19 +671,459 @@ impl SettingsView {
                 cx,
             ),
             heading("Fonts", t),
-            labeled(
+            self.font_field(
+                FontField::Ui,
                 "Interface font",
-                "Any installed font. Press Enter to apply; leave empty for Inter.",
-                self.ui_font_input.clone().into_any_element(),
+                "Any font installed on this computer. Type to search, press Enter to apply, leave empty for Inter.",
                 t,
+                cx,
             ),
-            labeled(
+            self.font_field(
+                FontField::Code,
                 "Code font",
                 "Used in code blocks. Leave empty for JetBrains Mono.",
-                self.code_font_input.clone().into_any_element(),
                 t,
+                cx,
             ),
-        ]
+            heading("Custom theme", t),
+        ];
+        out.extend(self.theme_editor(t, s, cx));
+        out
+    }
+
+    fn font_field(
+        &mut self,
+        field: FontField,
+        title: &'static str,
+        desc: &'static str,
+        t: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = match field {
+            FontField::Ui => self.ui_font_input.clone(),
+            FontField::Code => self.code_font_input.clone(),
+        };
+        let open = self.font_picker == Some(field);
+        if open && self.fonts.is_none() {
+            let mut names = cx.text_system().all_font_names();
+            names.sort_by_key(|n| n.to_lowercase());
+            names.dedup();
+            self.fonts = Some(Rc::new(names));
+        }
+        let query = input.read(cx).text().trim().to_lowercase();
+        let matches: Vec<String> = match (&self.fonts, open) {
+            (Some(fonts), true) => fonts
+                .iter()
+                .filter(|f| query.is_empty() || f.to_lowercase().contains(&query))
+                .take(8)
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        };
+        let picker = (!matches.is_empty()).then(|| {
+            div()
+                .mt(px(4.))
+                .p(px(4.))
+                .rounded(t.radius_small)
+                .bg(t.floating)
+                .border_1()
+                .border_color(t.border)
+                .flex()
+                .flex_col()
+                .children(matches.into_iter().enumerate().map(|(ix, name)| {
+                    let input = input.clone();
+                    let family: SharedString = name.clone().into();
+                    div()
+                        .id(ElementId::NamedInteger(
+                            format!("font-{title}").into(),
+                            ix as u64,
+                        ))
+                        .px(px(8.))
+                        .py(px(4.))
+                        .rounded(t.radius_small)
+                        .cursor_pointer()
+                        .hover(|st| st.bg(t.hover))
+                        .font_family(family)
+                        .text_color(t.text)
+                        .child(name.clone())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            input.update(cx, |i, cx| i.set_text(name.clone(), cx));
+                            this.font_picker = None;
+                            let value = Some(name.clone());
+                            this.update(cx, |s| match field {
+                                FontField::Ui => s.appearance.ui_font = value,
+                                FontField::Code => s.appearance.code_font = value,
+                            });
+                        }))
+                }))
+        });
+        row(title, desc, t)
+            .items_start()
+            .child(
+                div()
+                    .w(px(260.))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .h(px(36.))
+                            .px(px(10.))
+                            .flex()
+                            .items_center()
+                            .rounded(t.radius_small)
+                            .bg(t.input)
+                            .child(input),
+                    )
+                    .children(picker),
+            )
+            .into_any_element()
+    }
+
+    fn theme_editor(
+        &mut self,
+        t: &Theme,
+        s: &mut Settings,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut out = Vec::new();
+        out.push(note(
+            "Start from any theme and change any color, then share it as a file. docs/THEMES.md in rcord's repository describes every key.",
+            t,
+        ));
+        let mut actions = div().flex().gap(px(8.)).mt(px(8.));
+        if s.appearance.custom_theme.is_none() {
+            actions = actions.child(
+                button(
+                    "theme-create",
+                    "Create from current theme",
+                    t.accent,
+                    t.accent_text,
+                    t,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.create_custom_theme(cx))),
+            );
+        } else {
+            actions = actions
+                .child(
+                    button("theme-export", "Export…", t.accent, t.accent_text, t)
+                        .on_click(cx.listener(|this, _, _, cx| this.export_theme(cx))),
+                )
+                .child(
+                    link_button("theme-delete", "Remove custom theme", t).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.update(cx, |s| {
+                                s.appearance.custom_theme = None;
+                                if s.appearance.theme == ThemeId::Custom {
+                                    s.appearance.theme = ThemeId::Dark;
+                                }
+                            });
+                        },
+                    )),
+                );
+        }
+        actions = actions
+            .child(
+                link_button("theme-import", "Import…", t)
+                    .on_click(cx.listener(|this, _, _, cx| this.import_theme(cx))),
+            )
+            .child(
+                link_button("theme-folder", "Open themes folder", t).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        if let Some(p) = this.state.read(cx).paths.clone() {
+                            let dir = p.themes();
+                            let _ = std::fs::create_dir_all(&dir);
+                            cx.open_with_system(&dir);
+                        }
+                    },
+                )),
+            );
+        out.push(actions.into_any_element());
+
+        if !self.installed_themes.is_empty() {
+            let mut chips = div().flex().gap(px(8.));
+            for (ix, (_, theme)) in self.installed_themes.iter().enumerate() {
+                let file = theme.clone();
+                let preview = Theme::from_settings(&rcord_settings::Appearance {
+                    theme: ThemeId::Custom,
+                    custom_theme: Some(theme.clone()),
+                    ..s.appearance.clone()
+                });
+                chips = chips.child(
+                    div()
+                        .id(ElementId::NamedInteger("installed-theme".into(), ix as u64))
+                        .h(px(32.))
+                        .px(px(10.))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .rounded(t.radius_small)
+                        .bg(t.hover)
+                        .cursor_pointer()
+                        .hover(|st| st.bg(t.selected))
+                        .child(div().size(px(14.)).rounded_full().bg(gpui::linear_gradient(
+                            135.,
+                            gpui::linear_color_stop(preview.accent, 0.),
+                            gpui::linear_color_stop(preview.surface, 1.),
+                        )))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(t.header)
+                                .child(theme.name.clone()),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.use_theme(file.clone(), cx);
+                        })),
+                );
+            }
+            out.push(
+                div()
+                    .mt(px(8.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(section_label("In your themes folder".to_owned(), t))
+                    .child(chips)
+                    .into_any_element(),
+            );
+        }
+
+        let Some(custom) = s.appearance.custom_theme.clone() else {
+            return out;
+        };
+        let base_theme = Theme::from_settings(&rcord_settings::Appearance {
+            theme: custom.base,
+            custom_theme: None,
+            ..s.appearance.clone()
+        });
+        let effective = Theme::from_settings(&rcord_settings::Appearance {
+            theme: ThemeId::Custom,
+            ..s.appearance.clone()
+        });
+        out.push(labeled(
+            "Name",
+            "Shown under the theme and used as the file name.",
+            div()
+                .h(px(36.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .rounded(t.radius_small)
+                .bg(t.input)
+                .child(self.theme_name_input.clone())
+                .into_any_element(),
+            t,
+        ));
+        let mut base = div()
+            .flex()
+            .p(px(3.))
+            .gap(px(2.))
+            .rounded(t.radius_small)
+            .bg(t.base);
+        for (ix, id) in ThemeId::ALL.into_iter().enumerate() {
+            let selected = id == custom.base;
+            base = base.child(
+                div()
+                    .id(ElementId::NamedInteger("theme-base".into(), ix as u64))
+                    .px(px(12.))
+                    .h(px(28.))
+                    .flex()
+                    .items_center()
+                    .rounded(t.radius_small)
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .cursor_pointer()
+                    .when(selected, |el| el.bg(t.selected).text_color(t.header))
+                    .when(!selected, |el| el.text_color(t.text_muted))
+                    .child(id.label())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.update(cx, |s| {
+                            if let Some(c) = &mut s.appearance.custom_theme {
+                                c.base = id;
+                            }
+                        })
+                    })),
+            );
+        }
+        out.push(
+            row(
+                "Starts from",
+                "Colors you leave empty come from this theme.",
+                t,
+            )
+            .child(base)
+            .into_any_element(),
+        );
+        if s.appearance.theme != ThemeId::Custom {
+            out.push(
+                row(
+                    "Not in use",
+                    "Pick the custom theme above to see your changes.",
+                    t,
+                )
+                .child(
+                    button("theme-use", "Use it", t.accent, t.accent_text, t).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.update(cx, |s| s.appearance.theme = ThemeId::Custom)
+                        }),
+                    ),
+                )
+                .into_any_element(),
+            );
+        }
+        for (ix, key) in COLOR_KEYS.iter().enumerate() {
+            let input = self.theme_inputs[ix].clone();
+            let fallback = base_theme
+                .color_of(key.key)
+                .map(crate::theme::hex)
+                .unwrap_or_default();
+            input.update(cx, |i, cx| i.set_placeholder(fallback.clone(), cx));
+            let shown = effective.color_of(key.key).unwrap_or(t.text);
+            let set = custom.colors.contains_key(key.key);
+            let reset_input = input.clone();
+            out.push(
+                row(key.label, key.help, t)
+                    .child(
+                        div()
+                            .size(px(28.))
+                            .flex_none()
+                            .rounded(t.radius_small)
+                            .border_1()
+                            .border_color(t.border)
+                            .bg(shown),
+                    )
+                    .child(
+                        div()
+                            .w(px(130.))
+                            .h(px(32.))
+                            .px(px(8.))
+                            .flex()
+                            .items_center()
+                            .rounded(t.radius_small)
+                            .bg(t.input)
+                            .font_family(t.code_font.clone())
+                            .text_sm()
+                            .child(input),
+                    )
+                    .child(
+                        small_icon_button(
+                            ElementId::NamedInteger("theme-reset".into(), ix as u64),
+                            Icon::Close,
+                            set,
+                            t,
+                        )
+                        .when(set, |el| {
+                            el.on_click(cx.listener(move |_, _, _, cx| {
+                                reset_input.update(cx, |i, cx| i.clear(cx));
+                            }))
+                        }),
+                    )
+                    .into_any_element(),
+            );
+        }
+        out
+    }
+
+    /// Puts `theme` in the editor and uses it.
+    fn use_theme(&mut self, theme: ThemeFile, cx: &mut Context<Self>) {
+        self.theme_name_input
+            .update(cx, |i, cx| i.set_text(theme.name.clone(), cx));
+        for (ix, key) in COLOR_KEYS.iter().enumerate() {
+            let text = theme.colors.get(key.key).cloned().unwrap_or_default();
+            self.theme_inputs[ix].update(cx, |i, cx| i.set_text(text, cx));
+        }
+        self.update(cx, |s| {
+            s.appearance.custom_theme = Some(theme);
+            s.appearance.theme = ThemeId::Custom;
+        });
+    }
+
+    fn create_custom_theme(&mut self, cx: &mut Context<Self>) {
+        let base = match self.state.read(cx).settings.appearance.theme {
+            ThemeId::Custom => ThemeId::Dark,
+            id => id,
+        };
+        let theme = ThemeFile {
+            name: format!("My {} theme", base.label()),
+            base,
+            ..ThemeFile::default()
+        };
+        self.use_theme(theme, cx);
+    }
+
+    fn rescan_themes(&mut self, cx: &mut Context<Self>) {
+        self.installed_themes = Rc::new(scan_themes(self.state.read(cx).paths.as_ref()));
+        cx.notify();
+    }
+
+    fn export_theme(&mut self, cx: &mut Context<Self>) {
+        let s = self.state.read(cx);
+        let Some(theme) = s.settings.appearance.custom_theme.clone() else {
+            return;
+        };
+        let dir = s
+            .paths
+            .as_ref()
+            .map(rcord_settings::Paths::themes)
+            .unwrap_or_else(std::env::temp_dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let pick = cx.prompt_for_new_path(&dir, Some(&theme.file_name()));
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(path))) = pick.await else {
+                return;
+            };
+            let result = theme.save(&path);
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => this.toast(&format!("Saved {}", path.display()), cx),
+                    Err(e) => this.toast(&e.to_string(), cx),
+                }
+                this.rescan_themes(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn import_theme(&mut self, cx: &mut Context<Self>) {
+        let pick = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import theme".into()),
+        });
+        let themes_dir = self
+            .state
+            .read(cx)
+            .paths
+            .as_ref()
+            .map(rcord_settings::Paths::themes);
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = pick.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let result = ThemeFile::load(&path);
+            this.update(cx, |this, cx| match result {
+                Ok(theme) => {
+                    // A copy in the themes folder keeps it in the list after this session.
+                    if let Some(dir) = &themes_dir
+                        && !path.starts_with(dir)
+                    {
+                        let _ = theme.save(&dir.join(theme.file_name()));
+                    }
+                    let name = theme.name.clone();
+                    this.use_theme(theme, cx);
+                    this.rescan_themes(cx);
+                    this.toast(&format!("Imported {name}"), cx);
+                }
+                Err(e) => this.toast(&e.to_string(), cx),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn accessibility(
@@ -1058,7 +1573,7 @@ impl SettingsView {
                             .items_center()
                             .justify_center()
                             .cursor_pointer()
-                            .font_family("JetBrains Mono")
+                            .font_family(theme(cx).code_font.clone())
                             .text_sm()
                             .text_color(if recording { t.accent } else { t.header })
                             .child(if recording {
@@ -1658,6 +2173,7 @@ fn banner(text: &str, t: &Theme) -> AnyElement {
 
 fn row(title: &str, desc: &str, t: &Theme) -> gpui::Div {
     div()
+        .w_full()
         .min_h(px(48.))
         .py(px(8.))
         .flex()
@@ -1945,7 +2461,7 @@ impl Render for SettingsView {
             .flex()
             .bg(t.base)
             .text_color(t.text)
-            .font_family("Inter")
+            .font_family(theme(cx).ui_font.clone())
             .child(
                 div()
                     .id("settings-nav")
@@ -1974,7 +2490,8 @@ impl Render for SettingsView {
                             .track_scroll(&self.scroll)
                             .child(
                                 div()
-                                    .max_w(px(740.))
+                                    .w(px(740.))
+                                    .max_w_full()
                                     .px(px(40.))
                                     .pt(px(60.))
                                     .pb(px(80.))
@@ -1989,7 +2506,10 @@ impl Render for SettingsView {
                                             .mb(px(12.))
                                             .child(title),
                                     )
-                                    .children(body.into_iter().map(|e| div().flex_none().child(e))),
+                                    .children(
+                                        body.into_iter()
+                                            .map(|e| div().flex_none().w_full().child(e)),
+                                    ),
                             ),
                     )
                     .child(
@@ -2026,6 +2546,190 @@ impl Render for SettingsView {
                     ),
             )
     }
+}
+
+fn scan_themes(paths: Option<&rcord_settings::Paths>) -> Vec<(std::path::PathBuf, ThemeFile)> {
+    let Some(dir) = paths.map(rcord_settings::Paths::themes) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .filter_map(|p| ThemeFile::load(&p).ok().map(|t| (p, t)))
+        .collect();
+    out.sort_by_key(|(_, t)| t.name.to_lowercase());
+    out
+}
+
+/// A theme as a sphere: its chat, sidebar and accent blended on a ball, ringed when chosen.
+fn theme_sphere(preview: &Theme, selected: bool, t: &Theme) -> impl IntoElement {
+    div()
+        .size(px(64.))
+        .rounded_full()
+        .p(px(3.))
+        .border_2()
+        .border_color(if selected {
+            t.accent
+        } else {
+            gpui::transparent_black()
+        })
+        .child(
+            div()
+                .size_full()
+                .rounded_full()
+                .bg(gpui::linear_gradient(
+                    150.,
+                    gpui::linear_color_stop(preview.surface, 0.2),
+                    gpui::linear_color_stop(preview.base, 0.95),
+                ))
+                .border_1()
+                .border_color(preview.border)
+                .shadow_md()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .size(px(18.))
+                        .rounded_full()
+                        .bg(preview.accent)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when(selected, |el| {
+                            el.child(
+                                icon(Icon::Check)
+                                    .size(px(12.))
+                                    .text_color(preview.accent_text),
+                            )
+                        }),
+                ),
+        )
+}
+
+/// Two message groups drawn with the current settings, so a change shows at once.
+fn message_preview(s: &Settings, t: &Theme) -> AnyElement {
+    let a = &s.appearance;
+    let compact = a.message_display == MessageDisplay::Compact;
+    let size = px(a.chat_font_size);
+    let line = px(a.chat_font_size * 1.375);
+    let avatar_size = px(40.);
+    let small_avatar = px(16.);
+    let msg = |name: &'static str, color: Hsla, time: &'static str, lines: &[&'static str]| {
+        if compact {
+            div()
+                .flex()
+                .flex_col()
+                .children(lines.iter().enumerate().map(|(ix, text)| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .px(px(16.))
+                        .min_h(line)
+                        .text_size(size)
+                        .child(
+                            div()
+                                .w(px(56.))
+                                .flex_none()
+                                .text_xs()
+                                .text_color(t.text_faint)
+                                .child(time),
+                        )
+                        .when(ix == 0 && a.show_avatars_in_compact, |el| {
+                            el.child(div().size(small_avatar).rounded_full().bg(color))
+                        })
+                        .when(ix == 0, |el| {
+                            el.child(
+                                div()
+                                    .flex_none()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(color)
+                                    .child(name),
+                            )
+                        })
+                        .child(div().text_color(t.text).child(*text))
+                }))
+        } else {
+            div()
+                .flex()
+                .gap(px(16.))
+                .px(px(16.))
+                .child(div().size(avatar_size).flex_none().rounded_full().bg(color))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .flex()
+                                .items_baseline()
+                                .gap(px(8.))
+                                .child(
+                                    div()
+                                        .text_size(size)
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(color)
+                                        .child(name),
+                                )
+                                .child(div().text_xs().text_color(t.text_faint).child(time)),
+                        )
+                        .children(lines.iter().map(|text| {
+                            div()
+                                .min_h(line)
+                                .text_size(size)
+                                .text_color(t.text)
+                                .child(*text)
+                        })),
+                )
+        }
+    };
+    let time = if a.hour24 { "14:02" } else { "2:02 PM" };
+    let time2 = if a.hour24 { "14:03" } else { "2:03 PM" };
+    div()
+        .py(px(12.))
+        .rounded(t.radius)
+        .bg(t.surface)
+        .border_1()
+        .border_color(t.border)
+        .font_family(t.ui_font.clone())
+        .flex()
+        .flex_col()
+        .child(msg(
+            "Mira",
+            gpui::rgb(0xeb459e).into(),
+            time,
+            &[
+                "Look at me, I'm a beautiful butterfly",
+                "Fluttering in the moonlight 🌙",
+            ],
+        ))
+        .child(div().h(px(a.group_spacing)))
+        .child(msg(
+            "Oskar",
+            gpui::rgb(0x3ba55c).into(),
+            time2,
+            &["Waiting for the day when compact mode is turned on"],
+        ))
+        .child(
+            div().px(px(16.)).pt(px(8.)).child(
+                div()
+                    .px(px(8.))
+                    .py(px(4.))
+                    .rounded(t.radius_small)
+                    .bg(t.code_bg)
+                    .font_family(t.code_font.clone())
+                    .text_sm()
+                    .text_color(t.text)
+                    .child(r#"let theme = "yours";"#),
+            ),
+        )
+        .into_any_element()
 }
 
 #[cfg(test)]

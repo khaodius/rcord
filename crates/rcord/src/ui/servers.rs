@@ -2,13 +2,14 @@
 
 use gpui::{
     Context, Entity, FontWeight, IntoElement, MouseButton, ObjectFit, Render, ScrollHandle,
-    Subscription, Window, div, img, prelude::*, px,
+    Subscription, Window, div, prelude::*, px,
 };
 use rcord_model::{Snowflake, cdn};
 use rcord_store::Change;
 
 use crate::state::{AppState, MenuItem, Overlay, StateEvent};
 use crate::theme::theme;
+use crate::ui::anim_img;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::{Tooltip, mention_badge, should_animate, snowflake_id};
 
@@ -204,7 +205,7 @@ impl Render for ServerRail {
 
         for (id, name, acronym, url, unread, mentions) in guilds {
             let content = match url {
-                Some(url) => img(url)
+                Some(url) => anim_img(url)
                     .size(px(48.))
                     .object_fit(ObjectFit::Cover)
                     .into_any_element(),
