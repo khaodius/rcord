@@ -3,7 +3,7 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
-## Unreleased
+## 0.1.4 - 2026-11-04
 
 - **Voice channels and calls**: join a voice channel and talk. Audio is Opus at the channel's
   bitrate with forward error correction, end-to-end encrypted with Discord's DAVE protocol (the
