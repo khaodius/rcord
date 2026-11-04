@@ -117,6 +117,9 @@ pub fn devices() -> DeviceList {
 #[derive(Debug)]
 pub struct Inbound {
     pub user_id: u64,
+    /// Sound from a stream being watched rather than from someone's microphone; it has
+    /// its own volume and never lights the speaking ring.
+    pub stream: bool,
     pub ssrc: u32,
     pub sequence: u16,
     pub opus: Vec<u8>,
@@ -153,6 +156,8 @@ struct Shared {
     push_to_talk: AtomicBool,
     stop: AtomicBool,
     volumes: Mutex<HashMap<u64, f32>>,
+    /// Volume of each watched stream's sound, by streamer.
+    stream_volumes: Mutex<HashMap<u64, f32>>,
 }
 
 /// Controls a running media loop. Dropping it stops the loop and closes the devices.
@@ -188,6 +193,7 @@ impl AudioEngine {
             push_to_talk: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             volumes: Mutex::new(HashMap::new()),
+            stream_volumes: Mutex::new(HashMap::new()),
         });
         let (tx, rx) = mpsc::channel();
         let thread_shared = shared.clone();
@@ -224,6 +230,14 @@ impl AudioEngine {
             .volumes
             .lock()
             .insert(user_id, volume.clamp(0.0, 2.0));
+    }
+
+    /// Volume for the sound of `streamer`'s stream, 0 to 2.
+    pub fn set_stream_volume(&self, streamer: u64, volume: f32) {
+        self.shared
+            .stream_volumes
+            .lock()
+            .insert(streamer, volume.clamp(0.0, 2.0));
     }
 
     pub fn update_settings(&self, settings: AudioSettings) {
@@ -265,6 +279,7 @@ impl MicTest {
                     if let Outbound::Opus(opus) = out {
                         let packet = Inbound {
                             user_id: 0,
+                            stream: false,
                             ssrc: 1,
                             sequence,
                             opus,
@@ -614,6 +629,7 @@ fn soft_clip(x: f32) -> f32 {
 
 struct Speaker {
     user_id: u64,
+    stream: bool,
     jitter: JitterBuffer,
     decoder: opus::Decoder,
     speaking: bool,
@@ -743,6 +759,7 @@ impl MediaLoop {
                 };
                 e.insert(Speaker {
                     user_id: p.user_id,
+                    stream: p.stream,
                     jitter: JitterBuffer::default(),
                     decoder,
                     speaking: false,
@@ -890,6 +907,7 @@ impl MediaLoop {
         let mut mixed = vec![0.0f32; FRAME * 2];
         let mut pcm = vec![0.0f32; FRAME * 2];
         let volumes = self.shared.volumes.lock().clone();
+        let stream_volumes = self.shared.stream_volumes.lock().clone();
         for speaker in self.speakers.values_mut() {
             let n = match speaker.jitter.pop() {
                 Playout::Frame(packet) => speaker.decoder.decode_float(&packet, &mut pcm, false),
@@ -905,7 +923,8 @@ impl MediaLoop {
             } else {
                 speaker.quiet_frames += 1;
             }
-            let speaking = loud || (speaker.speaking && speaker.quiet_frames < HANGOVER_FRAMES);
+            let speaking = !speaker.stream
+                && (loud || (speaker.speaking && speaker.quiet_frames < HANGOVER_FRAMES));
             if speaking != speaker.speaking {
                 speaker.speaking = speaking;
                 let _ = self.events.try_send(AudioEvent::Speaking {
@@ -916,7 +935,14 @@ impl MediaLoop {
             if deaf || n == 0 {
                 continue;
             }
-            let v = volumes.get(&speaker.user_id).copied().unwrap_or(1.0);
+            let v = if speaker.stream {
+                &stream_volumes
+            } else {
+                &volumes
+            }
+            .get(&speaker.user_id)
+            .copied()
+            .unwrap_or(1.0);
             for (m, s) in mixed.iter_mut().zip(samples) {
                 *m += s * v;
             }

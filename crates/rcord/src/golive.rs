@@ -132,6 +132,11 @@ pub struct Watching {
     pub viewers: Vec<Snowflake>,
     /// The newest picture, ready to draw.
     pub frame: Option<Arc<RenderImage>>,
+    /// The picture's size and the frames shown in the last second, for the quality badge.
+    pub size: (u32, u32),
+    pub fps: u32,
+    frames: u32,
+    counted_since: std::time::Instant,
     pending: Pending,
     handle: Option<StreamHandle>,
     _events: Option<Task<()>>,
@@ -229,19 +234,27 @@ impl AppState {
         }
         let guild = self.store.channel(channel).and_then(|c| c.guild_id);
         let key = stream_key(guild, channel, streamer);
-        if self.watching.as_ref().is_some_and(|w| w.key == key) {
+        if self.watching.iter().any(|w| w.key == key) {
+            self.focused_stream = Some(streamer);
+            cx.notify();
             return;
         }
         if self.call.as_ref().is_none_or(|c| c.channel != channel) {
+            // Streams belong to a channel; joining another one ends the ones watched here.
+            self.stop_all_watching(cx);
             self.join_voice(channel, cx);
         }
-        self.stop_watching(cx);
-        self.watching = Some(Watching {
+        self.focused_stream = Some(streamer);
+        self.watching.push(Watching {
             key: key.clone(),
             streamer,
             status: StreamStatus::Starting,
             viewers: Vec::new(),
             frame: None,
+            size: (0, 0),
+            fps: 0,
+            frames: 0,
+            counted_since: std::time::Instant::now(),
             pending: Pending::default(),
             handle: None,
             _events: None,
@@ -252,17 +265,161 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn stop_watching(&mut self, cx: &mut Context<Self>) {
-        let Some(mut w) = self.watching.take() else {
+    /// Sample streams for `RCORD_DEMO=streams`: tiles with generated pictures, so the stream
+    /// views can be seen and screenshotted without a call.
+    pub(crate) fn demo_streams(&mut self, cx: &mut Context<Self>) {
+        let people = crate::demo::streamers();
+        for (i, (streamer, hue)) in people.into_iter().enumerate() {
+            let (w, h) = (1280u32, 720u32);
+            let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+            for y in 0..h {
+                for x in 0..w {
+                    let fx = x as f32 / w as f32;
+                    let fy = y as f32 / h as f32;
+                    let band = ((fx * 8.0).floor() as u32 + (fy * 6.0).floor() as u32) % 2;
+                    let shade = 0.55 + 0.35 * (1.0 - fy) + 0.05 * band as f32;
+                    let [r, g, b] = hue;
+                    let px = |c: u8| (c as f32 * shade).min(255.0) as u8;
+                    rgba.extend_from_slice(&[px(b), px(g), px(r), 255]);
+                }
+            }
+            let Some(buffer) = image::RgbaImage::from_raw(w, h, rgba) else {
+                continue;
+            };
+            self.watching.push(Watching {
+                key: format!("demo:{i}"),
+                streamer,
+                status: StreamStatus::Live,
+                viewers: vec![streamer; i + 2],
+                frame: Some(Arc::new(RenderImage::new([image::Frame::new(buffer)]))),
+                size: (w, h),
+                fps: [60, 30, 60][i % 3],
+                frames: 0,
+                counted_since: std::time::Instant::now(),
+                pending: Pending::default(),
+                handle: None,
+                _events: None,
+            });
+        }
+        self.focused_stream = self.watching.first().map(|w| w.streamer);
+        cx.notify();
+    }
+
+    /// Opens the card for `streamer`'s stream in `channel`, fetching its thumbnail.
+    pub fn open_stream_preview(
+        &mut self,
+        channel: Snowflake,
+        streamer: Snowflake,
+        at: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_overlay(
+            Some(crate::state::Overlay::StreamPreview {
+                channel,
+                streamer,
+                at,
+            }),
+            cx,
+        );
+        let guild = self.store.channel(channel).and_then(|c| c.guild_id);
+        let key = stream_key(guild, channel, streamer);
+        // Discord refreshes thumbnails every few minutes, so a recent one is current.
+        if self
+            .stream_previews
+            .get(&key)
+            .is_some_and(|(_, at)| at.elapsed() < Duration::from_secs(60))
+        {
+            return;
+        }
+        let Some(rest) = cx.global::<Net>().rest() else {
             return;
         };
-        if let Some(gw) = &self.gateway {
+        let fetch_key = key.clone();
+        let task = cx
+            .global::<Net>()
+            .run(async move { rest.stream_preview(&fetch_key).await });
+        cx.spawn(async move |this, cx| {
+            let url = task.await.and_then(Result::ok).flatten();
+            this.update(cx, |s, cx| {
+                s.stream_previews
+                    .insert(key, (url, std::time::Instant::now()));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Stops watching `streamer`'s stream.
+    pub fn stop_watching(&mut self, streamer: Snowflake, cx: &mut Context<Self>) {
+        let Some(i) = self.watching.iter().position(|w| w.streamer == streamer) else {
+            return;
+        };
+        let w = self.watching.remove(i);
+        self.close_watch(w, true, cx);
+    }
+
+    pub fn stop_all_watching(&mut self, cx: &mut Context<Self>) {
+        for w in std::mem::take(&mut self.watching) {
+            self.close_watch(w, true, cx);
+        }
+    }
+
+    pub fn is_watching(&self, streamer: Snowflake) -> bool {
+        self.watching.iter().any(|w| w.streamer == streamer)
+    }
+
+    /// The stream drawn large: the focused one while it is watched, else the first.
+    pub fn focused_watch(&self) -> Option<&Watching> {
+        self.watching
+            .iter()
+            .find(|w| Some(w.streamer) == self.focused_stream)
+            .or_else(|| self.watching.first())
+    }
+
+    /// How loud `streamer`'s stream plays, 0 to 2.
+    pub fn stream_volume(&self, streamer: Snowflake) -> f32 {
+        self.settings
+            .voice
+            .stream_volumes
+            .get(&streamer.to_string())
+            .copied()
+            .unwrap_or(1.0)
+    }
+
+    pub fn set_stream_volume(&mut self, streamer: Snowflake, volume: f32, cx: &mut Context<Self>) {
+        let volume = volume.clamp(0.0, 2.0);
+        let id = streamer.to_string();
+        let v = &mut self.settings.voice.stream_volumes;
+        if (volume - 1.0).abs() > 0.005 {
+            v.insert(id, volume);
+        } else {
+            v.remove(&id);
+        }
+        if let Some(h) = self.call.as_ref().and_then(|c| c.voice_handle()) {
+            h.set_stream_volume(streamer.get(), volume);
+        }
+        self.save_settings(cx);
+        cx.notify();
+    }
+
+    /// Ends a watch, telling Discord unless the stream is already gone.
+    fn close_watch(&mut self, mut w: Watching, tell: bool, cx: &mut Context<Self>) {
+        if tell && let Some(gw) = &self.gateway {
             gw.send(Command::StreamDelete(StreamKey {
                 stream_key: w.key.clone(),
             }));
         }
         if let Some(old) = w.frame.take() {
             cx.drop_image(old, None);
+        }
+        if self.focused_stream == Some(w.streamer) {
+            self.focused_stream = self.watching.first().map(|w| w.streamer);
+        }
+        if self.watching.is_empty()
+            && matches!(self.overlay, Some(crate::state::Overlay::StreamFullscreen))
+        {
+            self.set_overlay(None, cx);
         }
         cx.notify();
     }
@@ -291,7 +448,7 @@ impl AppState {
     /// Ends both directions, for example when the call ends.
     pub(crate) fn end_streams(&mut self, cx: &mut Context<Self>) {
         self.stop_go_live(cx);
-        self.stop_watching(cx);
+        self.stop_all_watching(cx);
     }
 
     /// Looks at the main gateway's stream events.
@@ -326,7 +483,7 @@ impl AppState {
     fn with_pending(&mut self, key: &str, f: impl FnOnce(&mut Pending, &mut Vec<Snowflake>)) {
         if let Some(live) = self.go_live.as_mut().filter(|l| l.key == key) {
             f(&mut live.pending, &mut live.viewers);
-        } else if let Some(w) = self.watching.as_mut().filter(|w| w.key == key) {
+        } else if let Some(w) = self.watching.iter_mut().find(|w| w.key == key) {
             f(&mut w.pending, &mut w.viewers);
         }
     }
@@ -339,10 +496,9 @@ impl AppState {
         };
         if self.go_live.as_ref().is_some_and(|l| l.key == key) {
             self.go_live = None;
-        } else if self.watching.as_ref().is_some_and(|w| w.key == key) {
-            if let Some(old) = self.watching.take().and_then(|mut w| w.frame.take()) {
-                cx.drop_image(old, None);
-            }
+        } else if let Some(i) = self.watching.iter().position(|w| w.key == key) {
+            let w = self.watching.remove(i);
+            self.close_watch(w, false, cx);
         } else {
             return;
         }
@@ -371,7 +527,7 @@ impl AppState {
                     quality: live.preset.quality(),
                 },
             )
-        } else if let Some(w) = self.watching.as_mut().filter(|w| w.key == key) {
+        } else if let Some(w) = self.watching.iter_mut().find(|w| w.key == key) {
             if w.handle.is_some() {
                 return;
             }
@@ -432,7 +588,7 @@ impl AppState {
             live.handle = Some(handle);
             live.status = StreamStatus::Connecting;
             live._events = Some(task);
-        } else if let Some(w) = self.watching.as_mut().filter(|w| w.key == key) {
+        } else if let Some(w) = self.watching.iter_mut().find(|w| w.key == key) {
             w.handle = Some(handle);
             w.status = StreamStatus::Connecting;
             w._events = Some(task);
@@ -463,7 +619,7 @@ impl AppState {
             }
             return;
         }
-        let Some(w) = self.watching.as_mut().filter(|w| w.key == key) else {
+        let Some(w) = self.watching.iter_mut().find(|w| w.key == key) else {
             return;
         };
         match event {
@@ -477,13 +633,22 @@ impl AppState {
                     return;
                 };
                 let image = Arc::new(RenderImage::new([image::Frame::new(buffer)]));
+                w.size = (frame.width, frame.height);
+                w.frames += 1;
+                let elapsed = w.counted_since.elapsed();
+                if elapsed >= Duration::from_secs(1) {
+                    w.fps = (w.frames as f32 / elapsed.as_secs_f32()).round() as u32;
+                    w.frames = 0;
+                    w.counted_since = std::time::Instant::now();
+                }
                 if let Some(old) = w.frame.replace(image) {
                     cx.drop_image(old, None);
                 }
                 cx.notify();
             }
             VoiceEvent::Closed { reason, .. } => {
-                self.stop_watching(cx);
+                let streamer = w.streamer;
+                self.stop_watching(streamer, cx);
                 if reason != "Disconnected" {
                     self.toast(format!("The stream ended: {reason}"), cx);
                 }

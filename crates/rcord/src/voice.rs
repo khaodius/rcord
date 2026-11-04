@@ -50,6 +50,10 @@ impl Call {
         self.session_id.clone()
     }
 
+    pub(crate) fn voice_handle(&self) -> Option<&rcord_voice::VoiceHandle> {
+        self.handle.as_ref()
+    }
+
     /// Where a watched stream's sound is mixed in.
     pub(crate) fn audio_sink(
         &self,
@@ -83,6 +87,11 @@ fn apply_user_volumes(settings: &Settings, handle: &rcord_voice::VoiceHandle) {
     for id in ids {
         if let Ok(user) = id.parse::<u64>() {
             handle.set_user_volume(user, v.user_volume(id));
+        }
+    }
+    for (id, volume) in &v.stream_volumes {
+        if let Ok(user) = id.parse::<u64>() {
+            handle.set_stream_volume(user, *volume);
         }
     }
 }

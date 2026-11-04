@@ -305,6 +305,19 @@ impl Client {
         .await
     }
 
+    /// The latest thumbnail of a Go Live stream, as an image URL. Discord updates it every
+    /// few minutes while the stream runs; a stream that just started may have none yet.
+    pub async fn stream_preview(&self, stream_key: &str) -> Result<Option<String>> {
+        #[derive(Deserialize)]
+        struct Preview {
+            url: Option<String>,
+        }
+        let p: Preview = self
+            .get(&format!("/streams/{}/preview", encode_segment(stream_key)))
+            .await?;
+        Ok(p.url)
+    }
+
     /// The full profile, with badges, bio, connections and mutual servers.
     pub async fn user_profile(
         &self,

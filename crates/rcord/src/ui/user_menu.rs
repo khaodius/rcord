@@ -3,12 +3,11 @@
 //! permissions allow. It is drawn from live state, so its checkboxes and volume follow
 //! changes while it is open.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Bounds, ClipboardItem, Entity, FontWeight, IntoElement, MouseButton, Pixels,
-    Point, SharedString, Window, anchored, canvas, deferred, div, prelude::*, px,
+    AnyElement, App, ClipboardItem, Entity, FontWeight, IntoElement, Pixels, Point, SharedString,
+    Window, anchored, deferred, div, prelude::*, px,
 };
 use rcord_model::{Permissions, RelationshipKind, Snowflake};
 use rcord_rest::routes::MemberVoiceChange;
@@ -17,6 +16,7 @@ use crate::state::{AppState, Overlay, UserMenuPage};
 use crate::theme::{Theme, theme};
 use crate::ui::chat::ChatView;
 use crate::ui::icons::{Icon, icon};
+use crate::ui::volume::volume_bar;
 
 type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -70,7 +70,7 @@ pub fn user_menu(
                 .unwrap_or(1.0),
             local_mute: s.settings.voice.muted_users.contains(&id),
             live: vs.is_some_and(|v| v.self_stream),
-            watching: s.watching.as_ref().is_some_and(|w| w.streamer == user),
+            watching: s.is_watching(user),
             friend: s
                 .store
                 .relationships()
@@ -205,7 +205,7 @@ pub fn user_menu(
                     &t,
                     act(Rc::new(move |s, cx| {
                         if watching {
-                            s.stop_watching(cx)
+                            s.stop_watching(user, cx)
                         } else {
                             s.watch_stream(channel, user, cx)
                         }
@@ -540,21 +540,7 @@ fn note(text: &str, t: &Theme) -> AnyElement {
 
 /// User Volume, 0 to 200%, as in Discord. Dragging updates the call as it moves.
 fn volume_slider(state: &Entity<AppState>, user: Snowflake, volume: f32, t: &Theme) -> AnyElement {
-    const MAX: f32 = 2.0;
-    let fraction = (volume / MAX).clamp(0., 1.);
-    let bounds: Rc<Cell<Option<Bounds<Pixels>>>> = Rc::default();
-    let pick = {
-        let bounds = bounds.clone();
-        move |x: Pixels| -> Option<f32> {
-            let b = bounds.get()?;
-            let f = (f32::from(x - b.origin.x) / f32::from(b.size.width)).clamp(0., 1.);
-            // Whole percents, snapping to 100% near the middle like Discord's slider.
-            let v = (f * MAX * 100.).round() / 100.;
-            Some(if (v - 1.0).abs() < 0.03 { 1.0 } else { v })
-        }
-    };
-    let (down_state, move_state) = (state.clone(), state.clone());
-    let pick_down = pick.clone();
+    let state = state.clone();
     div()
         .px(px(8.))
         .py(px(6.))
@@ -575,52 +561,11 @@ fn volume_slider(state: &Entity<AppState>, user: Snowflake, volume: f32, t: &The
                         .child(format!("{:.0}%", volume * 100.)),
                 ),
         )
-        .child(
-            div()
-                .id("user-volume")
-                .h(px(20.))
-                .flex()
-                .items_center()
-                .cursor_pointer()
-                .relative()
-                .child(
-                    div().w_full().h(px(6.)).rounded_full().bg(t.base).child(
-                        div()
-                            .h_full()
-                            .w(gpui::relative(fraction))
-                            .rounded_full()
-                            .bg(t.accent),
-                    ),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left(gpui::relative(fraction))
-                        .ml(px(-7.))
-                        .size(px(14.))
-                        .rounded_full()
-                        .bg(gpui::white())
-                        .shadow_sm(),
-                )
-                .child(
-                    canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
-                        .absolute()
-                        .inset_0(),
-                )
-                .on_mouse_down(MouseButton::Left, move |e, _, cx| {
-                    cx.stop_propagation();
-                    if let Some(v) = pick_down(e.position.x) {
-                        down_state.update(cx, |s, cx| s.set_user_volume(user, v, cx));
-                    }
-                })
-                .on_mouse_move(move |e, _, cx| {
-                    if e.pressed_button == Some(MouseButton::Left)
-                        && let Some(v) = pick(e.position.x)
-                        && (v - volume).abs() >= 0.01
-                    {
-                        move_state.update(cx, |s, cx| s.set_user_volume(user, v, cx));
-                    }
-                }),
-        )
+        .child(volume_bar(
+            "user-volume",
+            volume,
+            t,
+            Rc::new(move |v, cx| state.update(cx, |s, cx| s.set_user_volume(user, v, cx))),
+        ))
         .into_any_element()
 }

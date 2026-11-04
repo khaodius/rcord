@@ -3,6 +3,23 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
+## 0.1.9 - 2026-11-04
+
+- **Streams play at full quality.** rcord now asks Discord for the streamer's full-quality
+  layer at the size you watch it. Before, Discord sent the small preview layer, which looked
+  about 240p. rcord also reports how much it can receive, so the stream is not held at its
+  starting bitrate.
+- **Watch several streams at once.** Each stream you open gets its own tile above the chat,
+  and two or more share the space as a grid, as in Discord's call view.
+- **Stream controls on hover**: mute, a volume slider from 0 to 200% (saved per streamer and
+  separate from their microphone volume), full screen, and stop watching. Double-click a
+  stream to toggle full screen, and press Escape to leave it. Each tile shows the stream's
+  resolution and frame rate, who is streaming, and how many people watch.
+- **Clicking LIVE** next to someone in a voice channel opens a Streaming Now card with the
+  stream's latest preview and a Watch Stream button, instead of starting the stream right
+  away.
+- Stream sound no longer lights the streamer's speaking ring.
+
 ## 0.1.8 - 2026-11-04
 
 - **Smoother Settings**: changes in Settings, Appearance above all, apply without the stutter.

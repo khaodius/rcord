@@ -320,6 +320,51 @@ pub struct VideoStreamIn {
     pub ssrc: u32,
     #[serde(default)]
     pub active: bool,
+    /// The layer's quality, 0 to 100; a simulcast sender's preview layer is lower.
+    #[serde(default)]
+    pub quality: Option<u32>,
+    #[serde(default)]
+    pub max_resolution: Option<ResolutionIn>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ResolutionIn {
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+}
+
+impl VideoIn {
+    /// The layer to watch: the highest quality active one, then the largest. Returns its
+    /// SSRC and pixel count (0 when the server did not say).
+    pub fn best_layer(&self) -> Option<(u32, u32)> {
+        let pixels = |s: &VideoStreamIn| {
+            s.max_resolution
+                .map_or(0, |r| r.width.saturating_mul(r.height))
+        };
+        self.streams
+            .iter()
+            .filter(|s| s.ssrc != 0 && s.active)
+            .max_by_key(|s| (s.quality.unwrap_or(100), pixels(s)))
+            .map(|s| (s.ssrc, pixels(s)))
+            .or((self.video_ssrc != 0).then_some((self.video_ssrc, 0)))
+    }
+}
+
+/// What this client wants to receive: full quality from `ssrc` at `pixels` on screen, and
+/// nothing from the sender's other layers.
+pub fn sink_wants(ssrc: u32, pixels: u32, others: &[u32]) -> serde_json::Value {
+    let mut streams = serde_json::Map::new();
+    for o in others.iter().filter(|o| **o != ssrc) {
+        streams.insert(o.to_string(), 0.into());
+    }
+    streams.insert(ssrc.to_string(), 100.into());
+    serde_json::json!({
+        "any": 100,
+        "streams": streams,
+        "pixelCounts": { ssrc.to_string(): pixels },
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -457,6 +502,29 @@ fn id_strings<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<u64>, D::Err
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watches_the_best_simulcast_layer() {
+        let info: VideoIn = serde_json::from_value(serde_json::json!({
+            "user_id": "5",
+            "audio_ssrc": 1,
+            "video_ssrc": 2,
+            "streams": [
+                {"ssrc": 2, "active": true, "quality": 50,
+                 "max_resolution": {"type": "fixed", "width": 640, "height": 360}},
+                {"ssrc": 4, "active": true, "quality": 100,
+                 "max_resolution": {"type": "source", "width": 0, "height": 0}},
+                {"ssrc": 6, "active": false, "quality": 100}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(info.best_layer(), Some((4, 0)));
+        let wants = sink_wants(4, 1920 * 1080, &[2, 4, 6]);
+        assert_eq!(wants["any"], 100);
+        assert_eq!(wants["streams"]["4"], 100);
+        assert_eq!(wants["streams"]["2"], 0);
+        assert_eq!(wants["pixelCounts"]["4"], 1920 * 1080);
+    }
 
     #[test]
     fn opcodes_round_trip() {

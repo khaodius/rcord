@@ -189,12 +189,12 @@ impl ChannelSidebar {
                             .bg(t.header),
                     )
                 });
-        let watching_key = s.watching.as_ref().map(|w| w.streamer);
+        let watched_streams: Vec<Snowflake> = s.watching.iter().map(|w| w.streamer).collect();
         for (user, name, url, muted, deafened, live) in voice {
             let state = self.state.clone();
             let watch_state = self.state.clone();
             let menu_state = self.state.clone();
-            let watched = watching_key == Some(user);
+            let watched = watched_streams.contains(&user);
             let speaking = talking.contains(&user);
             wrapper = wrapper.child(
                 div()
@@ -249,25 +249,14 @@ impl ChannelSidebar {
                                 .font_weight(FontWeight::BOLD)
                                 .cursor_pointer()
                                 .child("LIVE")
-                                .tooltip(move |_, cx| {
-                                    Tooltip::view(
-                                        if watched {
-                                            "Stop Watching"
-                                        } else {
-                                            "Watch Stream"
-                                        },
-                                        cx,
-                                    )
+                                .when(watched, |el| {
+                                    el.border_1().border_color(gpui::white().opacity(0.8))
                                 })
-                                .on_click(move |_, _, cx| {
+                                .on_click(move |e, _, cx| {
                                     cx.stop_propagation();
-                                    watch_state.update(cx, |s, cx| {
-                                        if watched {
-                                            s.stop_watching(cx);
-                                        } else {
-                                            s.watch_stream(id, user, cx);
-                                        }
-                                    })
+                                    let at = e.position();
+                                    watch_state
+                                        .update(cx, |s, cx| s.open_stream_preview(id, user, at, cx))
                                 }),
                         )
                     })

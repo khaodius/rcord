@@ -401,6 +401,8 @@ pub struct Voice {
     pub user_volumes: BTreeMap<String, f32>,
     /// People muted for you alone, by user ID.
     pub muted_users: Vec<String>,
+    /// Volume of each person's stream sound, by user ID, 0 to 2.
+    pub stream_volumes: BTreeMap<String, f32>,
 }
 
 impl Voice {
@@ -433,6 +435,7 @@ impl Default for Voice {
             max_bitrate_kbps: 128,
             user_volumes: BTreeMap::new(),
             muted_users: Vec::new(),
+            stream_volumes: BTreeMap::new(),
         }
     }
 }
@@ -695,6 +698,10 @@ impl Settings {
         }
         // Full volume is the default, so it needs no entry.
         v.user_volumes.retain(|_, vol| (*vol - 1.0).abs() > 0.005);
+        for vol in v.stream_volumes.values_mut() {
+            *vol = finite_or(*vol, 1.0).clamp(0.0, 2.0);
+        }
+        v.stream_volumes.retain(|_, vol| (*vol - 1.0).abs() > 0.005);
         v.muted_users.sort();
         v.muted_users.dedup();
         self.stream.fps = match self.stream.fps {

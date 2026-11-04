@@ -17,6 +17,7 @@ pub mod text_input;
 pub mod title_bar;
 pub mod user_menu;
 pub mod video;
+pub mod volume;
 pub mod workspace;
 
 use gpui::{

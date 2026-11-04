@@ -168,6 +168,11 @@ pub struct OverlayLayer {
     search: Entity<TextInput>,
     switcher: Entity<TextInput>,
     video: Option<Entity<VideoPlayer>>,
+    /// Takes Escape while a stream is full screen.
+    stream_focus: gpui::FocusHandle,
+    /// Whether this layer put the window into full screen for a stream, so leaving the
+    /// stream restores it.
+    stream_fullscreen: bool,
     _subs: Vec<Subscription>,
 }
 
@@ -236,6 +241,8 @@ impl OverlayLayer {
             search,
             switcher,
             video: None,
+            stream_focus: cx.focus_handle(),
+            stream_fullscreen: false,
             _subs: subs,
         }
     }
@@ -272,6 +279,19 @@ impl OverlayLayer {
                 }
             }
             _ => self.video = None,
+        }
+        let want = matches!(overlay, Some(Overlay::StreamFullscreen));
+        if want && !self.stream_fullscreen {
+            self.stream_fullscreen = true;
+            if !window.is_fullscreen() {
+                window.toggle_fullscreen();
+            }
+            window.focus(&self.stream_focus);
+        } else if !want && self.stream_fullscreen {
+            self.stream_fullscreen = false;
+            if window.is_fullscreen() {
+                window.toggle_fullscreen();
+            }
         }
     }
 
@@ -1125,6 +1145,38 @@ impl Render for OverlayLayer {
             None | Some(Overlay::Settings(_)) => {}
             Some(Overlay::Menu { at, items }) => {
                 root = scrim_close(root, self.state.clone()).child(self.menu(at, items, cx));
+            }
+            Some(Overlay::StreamFullscreen) => {
+                if let Some(stage) = crate::ui::stream_view::fullscreen_stream(&self.state, cx) {
+                    let state = self.state.clone();
+                    root = root
+                        .track_focus(&self.stream_focus)
+                        .on_key_down(move |e: &gpui::KeyDownEvent, _, cx| {
+                            if matches!(e.keystroke.key.as_str(), "escape" | "f") {
+                                cx.stop_propagation();
+                                state.update(cx, |s, cx| s.set_overlay(None, cx));
+                            }
+                        })
+                        .bg(gpui::black())
+                        .child(stage);
+                }
+            }
+            Some(Overlay::StreamPreview {
+                channel,
+                streamer,
+                at,
+            }) => {
+                let card =
+                    crate::ui::stream_view::stream_preview_card(&self.state, channel, streamer, cx);
+                root = scrim_close(root, self.state.clone()).child(
+                    deferred(
+                        anchored()
+                            .position(point(at.x + px(16.), at.y - px(24.)))
+                            .snap_to_window_with_margin(px(12.))
+                            .child(card),
+                    )
+                    .with_priority(1),
+                );
             }
             Some(Overlay::UserMenu {
                 user,

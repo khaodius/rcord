@@ -121,6 +121,18 @@ fn last_message_id() -> u64 {
     Snowflake::from_timestamp_ms(now_ms() - 60_000).map_or(0, Snowflake::get) + 99
 }
 
+/// People shown streaming in `RCORD_DEMO=streams`, each with a picture color.
+pub fn streamers() -> Vec<(Snowflake, [u8; 3])> {
+    [
+        (PEOPLE[1].id, [88, 101, 242]),
+        (PEOPLE[2].id, [35, 165, 90]),
+        (PEOPLE[3].id, [240, 178, 50]),
+    ]
+    .into_iter()
+    .filter_map(|(id, hue)| Snowflake::new(id).map(|s| (s, hue)))
+    .collect()
+}
+
 pub fn ready() -> Value {
     let cat_info = GUILD + 10;
     let cat_text = GUILD + 11;
