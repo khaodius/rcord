@@ -12,6 +12,38 @@ Packages for every version are attached to its
   and the devices chosen in Settings > Voice all apply live. People speaking get a green ring in
   the channel list. A dropped voice connection resumes without leaving the call.
 
+## 0.1.3 - 2026-11-04
+
+- **Friends page**: Home shows your friends instead of "Pick a conversation". Tabs for Online,
+  All, Pending (with a count of requests to answer) and Blocked, a search, Message and profile
+  buttons on each friend, accept and ignore on requests, and Add Friend by username. The
+  Active Now column shows what friends are playing or listening to and which voice channel
+  they are in. The Friends button in the DM list now opens it.
+- **Pop-out panels**: drop the server list, channel list or member list on the target at the
+  top of the window, or outside the window, and it opens in its own window. Closing that window
+  or pressing Dock puts it back, sliding open with a glow around where it landed.
+- **Custom themes**: create a theme from the current one and change any color, the corner radii
+  and the fonts in Settings > Appearance. Themes export to and import from TOML files, and
+  files in the themes folder are listed for one-click switching. docs/THEMES.md describes the
+  format.
+- **Appearance**: a live message preview at the top of Appearance follows every change to
+  scaling, message display and avatars in compact mode. The interface and code fonts are picked
+  from the fonts installed on your computer. The theme picker shows a single sphere per theme.
+- **Animated emoji, GIFs, avatars and server icons** play again. They showed only their first
+  frame.
+- **Member list** no longer goes empty at random. Discord keeps one list per set of channel
+  permissions, and rcord could show a different list than the one it had asked for.
+- **Loading older messages** no longer puts the new page below the loading placeholders when
+  you keep scrolling up while it loads; the view stays on the message you were reading.
+- **Moving panels**: the outline on a lifted panel's own spot only shows while the pointer is
+  back over it.
+- **Memory**: decoded images default to 96 MB instead of 256 MB (settings still on the old
+  default move to the new one), only the last eight channels opened keep their history in
+  memory, and on Linux freed memory is handed back to the system after sign-in and once a
+  minute.
+- New app icon, and a gear for Settings.
+- The up arrow, sign-out and shield icons, which were blank, now draw.
+
 ## 0.1.2 - 2026-11-04
 
 - **Sign-in fixed**: after a successful sign-in rcord failed with "duplicate field

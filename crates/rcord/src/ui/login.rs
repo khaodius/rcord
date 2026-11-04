@@ -1004,7 +1004,7 @@ impl Render for LoginView {
             .items_center()
             .justify_center()
             .bg(t.sidebar)
-            .font_family("Inter")
+            .font_family(theme(cx).ui_font.clone())
             .text_color(t.text)
             .on_key_down(move |e: &KeyDownEvent, window, cx| {
                 // Tab moves between the two fields, as it does on Discord's page.

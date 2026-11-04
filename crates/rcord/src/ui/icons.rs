@@ -47,6 +47,9 @@ pub enum Icon {
     Screen,
     Video,
     Check,
+    Message,
+    UserPlus,
+    Gamepad,
     ChevronUp,
     Logout,
     Shield,
@@ -84,6 +87,9 @@ impl Icon {
             Self::ChevronUp => "chevron-up",
             Self::Logout => "logout",
             Self::Shield => "shield",
+            Self::Message => "message",
+            Self::UserPlus => "user-plus",
+            Self::Gamepad => "gamepad",
             Self::ChevronRight => "chevron-right",
             Self::Bell => "bell",
             Self::Inbox => "inbox",
@@ -132,7 +138,7 @@ impl Icon {
                 r#"<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="5" height="7" rx="2"/><rect x="16" y="14" width="5" height="7" rx="2"/><path d="M3 3l18 18"/>"#
             }
             Self::Gear => {
-                r#"<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>"#
+                r#"<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>"#
             }
             Self::Plus => r#"<path d="M12 5v14M5 12h14"/>"#,
             Self::PlusCircle => r#"<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>"#,
@@ -186,10 +192,17 @@ impl Icon {
                 r#"<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/>"#
             }
             Self::Check => r#"<path d="m5 12 5 5 9-10"/>"#,
+            Self::Message => r#"<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/>"#,
+            Self::UserPlus => {
+                r#"<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>"#
+            }
+            Self::Gamepad => {
+                r#"<path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><rect x="2" y="6" width="20" height="12" rx="4"/>"#
+            }
         }
     }
 
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 43] = [
         Self::Logo,
         Self::Hash,
         Self::Announcement,
@@ -227,6 +240,12 @@ impl Icon {
         Self::Screen,
         Self::Video,
         Self::Check,
+        Self::Message,
+        Self::UserPlus,
+        Self::Gamepad,
+        Self::ChevronUp,
+        Self::Logout,
+        Self::Shield,
     ];
 
     fn document(self) -> String {

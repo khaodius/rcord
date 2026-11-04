@@ -5,6 +5,7 @@
 mod build_number;
 mod demo;
 mod image_cache;
+mod memory;
 mod net;
 mod state;
 mod theme;
@@ -27,7 +28,7 @@ use crate::image_cache::LruImageCache;
 use crate::net::{DEFAULT_BUILD_NUMBER, ImageHttp, Net};
 use crate::state::{AppState, Connection, Screen, StateEvent};
 use crate::theme::theme;
-use crate::ui::icons::{Assets, Icon, icon};
+use crate::ui::icons::Assets;
 use crate::ui::login::LoginView;
 use crate::ui::workspace::Workspace;
 
@@ -75,6 +76,7 @@ impl Root {
     fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let budget = state.read(cx).settings.advanced.image_cache_mb as usize * 1024 * 1024;
         let images = LruImageCache::new(budget, cx);
+        cx.set_global(crate::image_cache::SharedImages(images.clone()));
         let subs = vec![cx.subscribe_in(
             &state,
             window,
@@ -243,7 +245,7 @@ impl Root {
                 .items_center()
                 .justify_center()
                 .bg(gpui::hsla(0., 0., 0., 0.6))
-                .font_family("Inter")
+                .font_family(theme(cx).ui_font.clone())
                 .child(
                     div()
                         .id("update-prompt")
@@ -330,8 +332,14 @@ impl Root {
             .justify_center()
             .gap(px(16.))
             .bg(t.sidebar)
-            .font_family("Inter")
-            .child(icon(Icon::Logo).size(px(72.)).text_color(t.accent))
+            .font_family(theme(cx).ui_font.clone())
+            .child(
+                gpui::img(std::sync::Arc::new(gpui::Image::from_bytes(
+                    gpui::ImageFormat::Png,
+                    include_bytes!("../../../assets/icons/rcord-256.png").to_vec(),
+                )))
+                .size(px(88.)),
+            )
             .child(
                 div()
                     .text_xs()
@@ -381,6 +389,7 @@ fn load_settings(paths: Option<&Paths>) -> Settings {
 }
 
 fn main() {
+    memory::init();
     let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -446,8 +455,9 @@ fn main() {
                 tracing::warn!("could not load bundled fonts: {e}");
             }
             rebind_keys(&settings.keybinds, cx);
+            // Popped-out panels close with the main window.
             cx.on_window_closed(|cx| {
-                if cx.windows().is_empty() {
+                if cx.windows().iter().all(|w| w.downcast::<Root>().is_none()) {
                     cx.quit();
                 }
             })

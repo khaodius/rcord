@@ -7,9 +7,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+mod theme_file;
+pub use theme_file::{COLOR_KEYS, ColorKey, ThemeError, ThemeFile, parse_color};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Which of the one-time upgrades in [`Settings::from_toml`] this file has had. A
+    /// file without it is from before revisions, so it reads as 0.
+    #[serde(default)]
+    pub revision: u32,
     pub appearance: Appearance,
     pub accessibility: Accessibility,
     pub chat: Chat,
@@ -22,6 +29,28 @@ pub struct Settings {
     pub advanced: Advanced,
     pub language: Language,
     pub session: Session,
+}
+
+const REVISION: u32 = 1;
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            revision: REVISION,
+            appearance: Appearance::default(),
+            accessibility: Accessibility::default(),
+            chat: Chat::default(),
+            notifications: Notifications::default(),
+            privacy: Privacy::default(),
+            voice: Voice::default(),
+            stream: Stream::default(),
+            keybinds: Keybinds::default(),
+            layout: Layout::default(),
+            advanced: Advanced::default(),
+            language: Language::default(),
+            session: Session::default(),
+        }
+    }
 }
 
 /// Which account to sign back in to. The token itself is in the system keychain.
@@ -40,6 +69,8 @@ pub enum ThemeId {
     Midnight,
     Ash,
     Light,
+    /// The theme in `appearance.custom_theme`.
+    Custom,
 }
 
 impl ThemeId {
@@ -51,6 +82,7 @@ impl ThemeId {
             Self::Midnight => "Midnight",
             Self::Ash => "Ash",
             Self::Light => "Light",
+            Self::Custom => "Custom",
         }
     }
 }
@@ -109,6 +141,8 @@ pub struct Appearance {
     pub server_names: bool,
     /// Draws a one-pixel separator between panels instead of relying on color alone.
     pub panel_borders: bool,
+    /// The custom theme, used when `theme` is `custom`.
+    pub custom_theme: Option<ThemeFile>,
 }
 
 impl Default for Appearance {
@@ -131,6 +165,7 @@ impl Default for Appearance {
             code_font: None,
             server_names: false,
             panel_borders: false,
+            custom_theme: None,
         }
     }
 }
@@ -521,7 +556,7 @@ impl Default for Advanced {
     fn default() -> Self {
         Self {
             developer_mode: false,
-            image_cache_mb: 256,
+            image_cache_mb: 96,
             disk_cache_mb: 1024,
             start_minimized: false,
             close_to_tray: false,
@@ -568,6 +603,12 @@ impl Settings {
         a.corner_radius = finite_or(a.corner_radius, 8.0).clamp(0.0, 16.0);
         a.saturation = finite_or(a.saturation, 1.0).clamp(0.0, 1.0);
         a.accent &= 0xFF_FFFF;
+        if let Some(theme) = &mut a.custom_theme {
+            theme.sanitize();
+        }
+        if a.theme == ThemeId::Custom && a.custom_theme.is_none() {
+            a.theme = ThemeId::Dark;
+        }
         self.accessibility.tts_rate = finite_or(self.accessibility.tts_rate, 1.0).clamp(0.5, 2.0);
         self.chat.max_media_height =
             finite_or(self.chat.max_media_height, 350.0).clamp(100.0, 1000.0);
@@ -591,6 +632,11 @@ impl Settings {
 
     pub fn from_toml(text: &str) -> Result<Self, Error> {
         let mut s: Self = toml::from_str(text)?;
+        if s.revision < 1 && s.advanced.image_cache_mb == 256 {
+            // 0.1.3 lowered the image memory default; files still on the old default move.
+            s.advanced.image_cache_mb = Advanced::default().image_cache_mb;
+        }
+        s.revision = s.revision.max(REVISION);
         s.sanitize();
         Ok(s)
     }
@@ -655,6 +701,11 @@ impl Paths {
         self.config_dir.join("settings.toml")
     }
 
+    /// Where theme files are kept, so they show up in Settings > Appearance.
+    pub fn themes(&self) -> PathBuf {
+        self.config_dir.join("themes")
+    }
+
     pub fn image_cache(&self) -> PathBuf {
         self.cache_dir.join("images")
     }
@@ -663,6 +714,14 @@ impl Paths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_image_default_moves_down() {
+        let s = Settings::from_toml("[advanced]\nimage_cache_mb = 256\n").unwrap();
+        assert_eq!(s.advanced.image_cache_mb, 96);
+        let s = Settings::from_toml("revision = 1\n[advanced]\nimage_cache_mb = 256\n").unwrap();
+        assert_eq!(s.advanced.image_cache_mb, 256);
+    }
 
     #[test]
     fn round_trips() {

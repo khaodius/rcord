@@ -190,9 +190,34 @@ pub fn ready() -> Value {
             { "id": (GUILD + 5000).to_string(), "type": 1, "recipient_ids": [(ME + STEP).to_string()], "last_message_id": null },
             { "id": (GUILD + 5001).to_string(), "type": 1, "recipient_ids": [(ME + 3 * STEP).to_string()], "last_message_id": null },
         ],
-        "relationships": [],
+        "relationships": PEOPLE.iter().skip(1).map(|p| json!({
+            "id": p.id.to_string(),
+            "type": if p.username == "vale" { 3 } else { 1 },
+        })).collect::<Vec<_>>(),
         "read_state": { "entries": [] },
     })
+}
+
+/// A person's custom status, plus a game or song for a couple of them.
+fn activities(p: &Person) -> Vec<Value> {
+    let mut out: Vec<Value> = p
+        .activity
+        .map(|a| json!({ "type": 4, "name": "Custom Status", "state": a }))
+        .into_iter()
+        .collect();
+    let now = now_ms();
+    match p.username {
+        "mira" => out.push(json!({
+            "type": 0, "name": "Factorio", "details": "Building a main bus",
+            "state": "Freeplay", "timestamps": { "start": now - 83 * 60_000 },
+        })),
+        "kestrel" => out.push(json!({
+            "type": 2, "name": "Spotify", "details": "Midnight Drive", "state": "The Night Owls",
+            "timestamps": { "start": now - 60_000, "end": now + 150_000 },
+        })),
+        _ => {}
+    }
+    out
 }
 
 pub fn presences() -> Value {
@@ -202,7 +227,7 @@ pub fn presences() -> Value {
             "guilds": [PEOPLE.iter().map(|p| json!({
                 "user_id": p.id.to_string(),
                 "status": p.status,
-                "activities": p.activity.map(|a| vec![json!({ "type": 4, "name": "Custom Status", "state": a })]).unwrap_or_default(),
+                "activities": activities(p),
             })).collect::<Vec<_>>(), [], [], []],
         },
         "guilds": [],
@@ -239,7 +264,7 @@ pub fn member_list() -> Value {
                 "presence": {
                     "user": { "id": p.id.to_string() },
                     "status": p.status,
-                    "activities": p.activity.map(|a| vec![json!({ "type": 4, "name": "Custom Status", "state": a })]).unwrap_or_default(),
+                    "activities": activities(p),
                 },
             }}));
         }

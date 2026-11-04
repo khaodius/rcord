@@ -1,7 +1,7 @@
 //! Typed endpoints. Each one is a thin wrapper over [`Client::request`].
 
 use http::Method;
-use rcord_model::{Emoji, Message, Snowflake, StickerPack, User, UserProfile};
+use rcord_model::{Channel, Emoji, Message, Snowflake, StickerPack, User, UserProfile};
 use serde::{Deserialize, Serialize};
 
 use crate::{Client, Result};
@@ -213,6 +213,45 @@ impl Client {
             Method::POST,
             &format!("/channels/{channel}/messages/{message}/ack"),
             Some(&Ack { token: None }),
+        )
+        .await
+    }
+
+    /// Opens (or finds) the DM with `user`.
+    pub async fn create_dm(&self, user: Snowflake) -> Result<Channel> {
+        self.post(
+            "/users/@me/channels",
+            &serde_json::json!({ "recipient_id": user.to_string() }),
+        )
+        .await
+    }
+
+    /// Accepts a friend request from `user`, or sends one to them.
+    pub async fn add_friend(&self, user: Snowflake) -> Result<()> {
+        self.send_empty(
+            Method::PUT,
+            &format!("/users/@me/relationships/{user}"),
+            Some(&serde_json::json!({})),
+        )
+        .await
+    }
+
+    /// Sends a friend request by username.
+    pub async fn send_friend_request(&self, username: &str) -> Result<()> {
+        self.send_empty(
+            Method::POST,
+            "/users/@me/relationships",
+            Some(&serde_json::json!({ "username": username, "discriminator": null })),
+        )
+        .await
+    }
+
+    /// Removes a friend, ignores or cancels a request, or unblocks.
+    pub async fn remove_relationship(&self, user: Snowflake) -> Result<()> {
+        self.send_empty::<()>(
+            Method::DELETE,
+            &format!("/users/@me/relationships/{user}"),
+            None,
         )
         .await
     }

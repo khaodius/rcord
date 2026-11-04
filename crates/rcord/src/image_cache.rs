@@ -12,6 +12,11 @@ use gpui::{
     RenderImage, Resource, Task, Window, hash,
 };
 
+/// The main window's cache, for other windows to draw from the same images.
+pub struct SharedImages(pub Entity<LruImageCache>);
+
+impl gpui::Global for SharedImages {}
+
 type Load = Shared<Task<Result<Arc<RenderImage>, ImageCacheError>>>;
 
 struct Entry {

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/rcord.svg" alt="rcord" width="96" height="96">
+  <img src="assets/icons/rcord-256.png" alt="rcord" width="96" height="96">
 </p>
 
 <h1 align="center">rcord</h1>
@@ -25,7 +25,9 @@
 - **Discord's layout, rearrangeable**: servers, channels, chat and members sit where Discord puts
   them. Hold the right mouse button on a panel, move it, and release to put it somewhere else; a
   quick right click still opens the context menu. Drag a side panel's edge to resize it, and
-  double-click the edge to restore it.
+  double-click the edge to restore it. Drop the server list, channel list or member list on the
+  target at the top, or outside the window, and it opens in a window of its own; closing that
+  window or pressing **Dock** slides it back into place.
 - **Messages** with Discord's full markdown: bold, italics, underline, strikethrough, spoilers,
   headings, subtext, quotes, lists, inline code and code blocks, masked links, mentions of users,
   roles and channels, `@everyone`, slash command mentions and timestamps in every style. Replies,
@@ -39,6 +41,9 @@
   servers. Server profiles override global ones as they do in Discord.
 - **Presence**: online, idle, do-not-disturb and invisible, custom statuses and activities, and
   typing indicators.
+- **Friends** on Home: online friends with their status or activity, all friends, pending
+  requests to accept or ignore, blocked users, adding a friend by username, and an Active Now
+  column with the games, music and voice channels your friends are in.
 - **Unread state** synced with your other devices: unread channels, mention counts on channels and
   servers, mark as read, and jumping between unread channels from the keyboard.
 - **Quick switcher** (Ctrl + K) across every server and DM, unread ones first.
@@ -49,17 +54,24 @@
   Credential Manager, or the Secret Service of GNOME Keyring or KWallet), never in a file.
 - **Settings** for everything Discord has and more for the look of the app: four themes including
   an OLED black, any accent color, interface zoom, chat font size, cozy or compact messages, group
-  spacing, corner roundness, saturation, interface and code fonts, role color style, animation
+  spacing, corner roundness, saturation, interface and code fonts picked from the fonts installed
+  on your computer, a live preview of messages as you change them, role color style, animation
   rules for emoji and avatars, reduced motion, link underlines, role color contrast, streamer mode,
   privacy, notifications, voice and screen share preferences, language, cache sizes and developer
   mode. Every change applies immediately and is saved as plain TOML.
+- **Custom themes**: start from a built-in theme and change any of 25 colors, both corner radii
+  and both fonts in Settings, or by hand in a TOML file. Export a theme to share it, import one
+  someone else made, or drop theme files in the themes folder. [docs/THEMES.md](docs/THEMES.md)
+  describes every key.
 - **Updates** at start: when a newer release is out, rcord asks, then installs it in the
   background without installer screens and restarts. It can be turned off in Settings.
 - **Rebindable shortcuts** for every action, recorded by pressing the keys.
 - **Resilient connection**: zlib-compressed gateway, session resume after a drop, reconnects with
   backoff, heartbeat timeouts detected, and Discord's rate limits followed per route.
 - **Image cache** on disk for Discord's CDN, keyed by URL, so avatars, emoji and attachments seen
-  once load instantly afterwards. Decoded images in memory are capped and evicted oldest first.
+  once load instantly afterwards. Decoded images in memory are capped and evicted oldest first,
+  only the last few channels keep their history in memory, and freed memory goes back to the
+  system instead of sitting in the heap.
 
 - **Voice channels and calls**: Opus audio at the channel's bitrate, Discord's end-to-end
   encryption (DAVE) with the call's privacy code, noise suppression (RNNoise), voice activity

@@ -2,11 +2,13 @@
 
 pub mod channels;
 pub mod chat;
+pub mod friends;
 pub mod icons;
 pub mod login;
 pub mod markup;
 pub mod members;
 pub mod overlays;
+pub mod panel_window;
 pub mod profile;
 pub mod servers;
 pub mod settings;
@@ -15,13 +17,20 @@ pub mod workspace;
 
 use gpui::{
     App, Context, Div, ElementId, FontWeight, Hsla, IntoElement, ObjectFit, Pixels, Render,
-    SharedString, Stateful, Window, div, img, prelude::*, px,
+    SharedString, Stateful, Window, div, prelude::*, px,
 };
 use rcord_model::{Snowflake, Status, User, cdn};
 use rcord_settings::Animate;
 
 use crate::theme::{Theme, theme};
 use icons::{Icon, icon};
+
+/// An image with an ID, which GPUI needs to keep an animated GIF or WebP playing: without
+/// one it has nowhere to keep the current frame and shows the first frame only.
+pub fn anim_img(src: impl Into<SharedString>) -> gpui::Stateful<gpui::Img> {
+    let src: SharedString = src.into();
+    gpui::img(src.clone()).id(gpui::ElementId::Name(src))
+}
 
 /// A round avatar with an optional status dot cut into its corner.
 pub fn avatar(
@@ -31,7 +40,7 @@ pub fn avatar(
 ) -> Div {
     let url: SharedString = url.into();
     let color = placeholder_color(&url);
-    let picture = img(url)
+    let picture = anim_img(url)
         .size(size)
         .rounded_full()
         .object_fit(ObjectFit::Cover)

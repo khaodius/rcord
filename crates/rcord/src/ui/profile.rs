@@ -1,13 +1,14 @@
 //! The profile card: banner, avatar with decoration, badges, bio, roles and member dates.
 
 use gpui::{
-    AnyElement, App, Entity, FontWeight, Hsla, IntoElement, ObjectFit, div, img, prelude::*, px,
+    AnyElement, App, Entity, FontWeight, Hsla, IntoElement, ObjectFit, div, prelude::*, px,
 };
 use rcord_model::{Snowflake, User, cdn};
 
 use crate::LocalTime;
 use crate::state::{AppState, ProfileState};
 use crate::theme::theme;
+use crate::ui::anim_img;
 use crate::ui::markup::{self, MarkupAction, MarkupCx};
 use crate::ui::{Tooltip, avatar, section_label, user_avatar_url};
 
@@ -191,7 +192,7 @@ pub fn profile_card(
             hour24: s.settings.appearance.hour24,
             utc_offset: offset,
             now_secs: (crate::state::now_ms() / 1000) as i64,
-            code_font: "JetBrains Mono".into(),
+            code_font: theme(cx).code_font.clone(),
             key: user_id.get(),
             on_action: std::rc::Rc::new(move |a, window, cx| match a {
                 MarkupAction::OpenUrl(u) => cx.open_url(&u),
@@ -212,7 +213,7 @@ pub fn profile_card(
         .bg(accent)
         .when_some(banner_hash, |el, h| {
             el.child(
-                img(cdn::user_banner(user_id, &h, 600, true))
+                anim_img(cdn::user_banner(user_id, &h, 600, true))
                     .size_full()
                     .object_fit(ObjectFit::Cover),
             )
@@ -235,7 +236,7 @@ pub fn profile_card(
         ))
         .when_some(decoration, |el, url| {
             el.child(
-                img(url)
+                anim_img(url)
                     .absolute()
                     .left(px(-4.))
                     .top(px(-4.))
@@ -262,7 +263,11 @@ pub fn profile_card(
                     .size(px(22.))
                     .cursor_pointer()
                     .tooltip(move |_, cx| Tooltip::view(desc.clone(), cx))
-                    .child(img(b.icon_url).size(px(22.)).object_fit(ObjectFit::Contain))
+                    .child(
+                        anim_img(b.icon_url)
+                            .size(px(22.))
+                            .object_fit(ObjectFit::Contain),
+                    )
                     .when_some(link, |el, l| el.on_click(move |_, _, cx| cx.open_url(&l))),
             );
         }

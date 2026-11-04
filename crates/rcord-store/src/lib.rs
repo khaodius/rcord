@@ -100,7 +100,12 @@ pub struct Store {
     relationships: FxHashMap<Snowflake, Relationship>,
     typing: FxHashMap<Snowflake, Vec<(Snowflake, u64)>>,
     voice: FxHashMap<Snowflake, VoiceState>,
-    member_lists: FxHashMap<Snowflake, MemberList>,
+    /// Every member list Discord keeps us subscribed to, by guild and list ID. A guild has one
+    /// list per distinct set of channel permissions.
+    member_lists: FxHashMap<(Snowflake, String), MemberList>,
+    /// The list shown for each guild: the one Discord last sent a full SYNC of, which answers
+    /// the subscription for the channel on screen.
+    current_member_list: FxHashMap<Snowflake, String>,
     message_cap: usize,
 }
 
@@ -129,6 +134,7 @@ impl Store {
             typing: FxHashMap::default(),
             voice: FxHashMap::default(),
             member_lists: FxHashMap::default(),
+            current_member_list: FxHashMap::default(),
             message_cap: messages_per_channel.max(50),
         }
     }
@@ -207,13 +213,18 @@ impl Store {
     }
 
     pub fn member_list(&self, guild: Snowflake) -> Option<&MemberList> {
-        self.member_lists.get(&guild)
+        let id = self.current_member_list.get(&guild)?;
+        self.member_lists.get(&(guild, id.clone()))
     }
 
     pub fn voice_states_in(&self, channel: Snowflake) -> impl Iterator<Item = &VoiceState> {
         self.voice
             .values()
             .filter(move |v| v.channel_id == Some(channel))
+    }
+
+    pub fn voice_state(&self, user: Snowflake) -> Option<&VoiceState> {
+        self.voice.get(&user)
     }
 
     pub fn my_voice_state(&self) -> Option<&VoiceState> {
@@ -414,6 +425,11 @@ impl Store {
         {
             p.failed = true;
         }
+    }
+
+    /// Drops the cached history of a channel. Read state and unsent messages stay.
+    pub fn forget_messages(&mut self, channel: Snowflake) {
+        self.messages.remove(&channel);
     }
 
     pub fn remove_pending(&mut self, channel: Snowflake, nonce: &str) {
@@ -641,12 +657,26 @@ impl Store {
 
     fn apply_member_list(&mut self, update: MemberListUpdate) -> Change {
         let guild = update.guild_id;
-        let mut list = self.member_lists.remove(&guild).unwrap_or_default();
-        if list.id != update.id {
-            list = MemberList {
+        let key = (guild, update.id.clone());
+        // Updates for another channel's list used to replace the one on screen, which left it
+        // empty until the next full sync. Each list is kept on its own now.
+        let mut list = self
+            .member_lists
+            .remove(&key)
+            .unwrap_or_else(|| MemberList {
                 id: update.id.clone(),
                 ..MemberList::default()
-            };
+            });
+        if update
+            .ops
+            .iter()
+            .any(|op| matches!(op, MemberListOp::Sync { .. }))
+        {
+            self.current_member_list.insert(guild, update.id.clone());
+        } else {
+            self.current_member_list
+                .entry(guild)
+                .or_insert_with(|| update.id.clone());
         }
         list.online = update.online_count;
         list.total = update.member_count;
@@ -707,7 +737,7 @@ impl Store {
                 }
             }
         }
-        self.member_lists.insert(guild, list);
+        self.member_lists.insert(key, list);
         Change::Members(guild)
     }
 
@@ -954,7 +984,8 @@ impl Store {
                     }
                 }
                 self.guild_order.retain(|g| *g != id);
-                self.member_lists.remove(&id);
+                self.member_lists.retain(|(g, _), _| *g != id);
+                self.current_member_list.remove(&id);
                 Change::Guilds
             }
             Update::GuildRoleUpsert { guild_id, role } => {
