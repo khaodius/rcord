@@ -95,6 +95,14 @@ pub enum Overlay {
         preset: crate::golive::StreamPreset,
     },
     Video(crate::ui::video::VideoSource),
+    /// The focused stream over the whole window.
+    StreamFullscreen,
+    /// The card a LIVE badge opens: a preview of the stream and a button to watch it.
+    StreamPreview {
+        channel: Snowflake,
+        streamer: Snowflake,
+        at: Point<Pixels>,
+    },
     /// The right-click menu for someone in a voice channel.
     UserMenu {
         user: Snowflake,
@@ -171,7 +179,12 @@ pub struct AppState {
     /// This client's own Go Live stream.
     pub go_live: Option<crate::golive::GoLive>,
     /// The stream this client is watching.
-    pub watching: Option<crate::golive::Watching>,
+    /// Streams being watched, in the order they were opened.
+    pub watching: Vec<crate::golive::Watching>,
+    /// The watched stream drawn large, by streamer.
+    pub focused_stream: Option<Snowflake>,
+    /// Stream thumbnails by stream key, with when they were fetched.
+    pub stream_previews: HashMap<String, (Option<String>, std::time::Instant)>,
     /// Voice participants whose profiles were requested, so each is asked for once.
     pub(crate) voice_members_requested: HashSet<Snowflake>,
     pump: Option<Task<()>>,
@@ -238,7 +251,9 @@ impl AppState {
             gateway: None,
             call: None,
             go_live: None,
-            watching: None,
+            watching: Vec::new(),
+            focused_stream: None,
+            stream_previews: HashMap::new(),
             voice_members_requested: HashSet::new(),
             pump: None,
             subscribed: BTreeMap::new(),
@@ -304,6 +319,10 @@ impl AppState {
         // `RCORD_DEMO=settings` opens straight onto the appearance settings.
         if std::env::var("RCORD_DEMO").is_ok_and(|v| v == "settings") {
             self.set_overlay(Some(Overlay::Settings(SettingsPage::Appearance)), cx);
+        }
+        // `RCORD_DEMO=streams` shows three watched streams with sample pictures.
+        if std::env::var("RCORD_DEMO").is_ok_and(|v| v == "streams") {
+            self.demo_streams(cx);
         }
         // `RCORD_DEMO=friends` opens on the friends page.
         if std::env::var("RCORD_DEMO").is_ok_and(|v| v == "friends") {
