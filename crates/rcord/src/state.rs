@@ -88,6 +88,7 @@ pub enum Overlay {
     },
     Expressions(ExpressionTab),
     QuickSwitcher,
+    Video(crate::ui::video::VideoSource),
 }
 
 #[derive(Debug, Clone)]

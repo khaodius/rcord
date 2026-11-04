@@ -167,6 +167,9 @@ impl Workspace {
                 }
                 StateEvent::Overlay => {
                     let overlay = state.read(cx).overlay.clone();
+                    this.overlays.update(cx, |layer, cx| {
+                        layer.sync_video(overlay.as_ref(), window, cx)
+                    });
                     match overlay {
                         Some(o @ (Overlay::Expressions(_) | Overlay::QuickSwitcher)) => {
                             this.overlays
@@ -347,11 +350,15 @@ impl Workspace {
                 (cursor.x - px(width / 2.)).max(px(0.)),
                 (cursor.y - px(40.)).max(px(0.)),
             );
+        let settings = &self.state.read(cx).settings;
+        let own_bar = settings.appearance.custom_title_bar;
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(format!("rcord · {}", panel.label()).into()),
+                appears_transparent: own_bar,
                 ..Default::default()
             }),
+            window_decorations: Some(crate::decorations(settings)),
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin,
                 size: size(px(width), px(height)),
@@ -493,7 +500,69 @@ impl Workspace {
             }))
     }
 
-    fn on_mouse_move(&mut self, e: &gpui::MouseMoveEvent, cx: &mut Context<Self>) {
+    fn pointer_watch(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let this = cx.entity().downgrade();
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                let moving = this.clone();
+                window.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, window, cx| {
+                    if phase == gpui::DispatchPhase::Bubble {
+                        moving
+                            .update(cx, |w, cx| w.on_mouse_move(e, window, cx))
+                            .ok();
+                    }
+                });
+                let releasing = this.clone();
+                window.on_mouse_event(move |e: &gpui::MouseUpEvent, phase, window, cx| {
+                    if phase != gpui::DispatchPhase::Capture {
+                        return;
+                    }
+                    let consumed = releasing
+                        .update(cx, |w, cx| w.on_mouse_up(e, window, cx))
+                        .unwrap_or(false);
+                    if consumed {
+                        // The release ends the move; it must not also open a context menu.
+                        cx.stop_propagation();
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_0()
+    }
+
+    /// Ends a move or a resize. Returns whether the release belonged to one.
+    fn on_mouse_up(
+        &mut self,
+        e: &gpui::MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match e.button {
+            MouseButton::Right => {
+                self.hold = None;
+                if let Some(l) = self.lift.as_mut() {
+                    l.cursor = e.position;
+                    self.drop_panel(window, cx);
+                    return true;
+                }
+                false
+            }
+            MouseButton::Left if self.resize.is_some() => {
+                self.commit_resize(cx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn on_mouse_move(
+        &mut self,
+        e: &gpui::MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(r) = self.resize.as_mut() {
             if e.pressed_button != Some(MouseButton::Left) {
                 self.commit_resize(cx);
@@ -518,6 +587,20 @@ impl Workspace {
         }
         if let Some(l) = self.lift.as_mut() {
             l.cursor = e.position;
+            // Carried past the window's edge, the panel leaves at once, so pulling it out
+            // is one motion rather than a drag and a drop.
+            let size = window.viewport_size();
+            let margin = px(12.);
+            let p = e.position;
+            let outside = p.x < -margin
+                || p.y < -margin
+                || p.x > size.width + margin
+                || p.y > size.height + margin;
+            let lift = *l;
+            if outside && detachable(lift.panel) {
+                self.lift = None;
+                self.pop_out(lift.panel, lift.cursor, window, cx);
+            }
             cx.notify();
         }
     }
@@ -774,7 +857,14 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom(None, cx)))
             .on_action(cx.listener(|this, _: &ResetLayout, _, cx| {
                 this.state.update(cx, |s, cx| {
-                    s.update_settings(cx, |st| st.layout = rcord_settings::Layout::default());
+                    s.update_settings(cx, |st| {
+                        // Panels go back to where they started; the server order stays.
+                        let guild_order = std::mem::take(&mut st.layout.guild_order);
+                        st.layout = rcord_settings::Layout {
+                            guild_order,
+                            ..Default::default()
+                        };
+                    });
                     s.toast("Layout reset", cx);
                 })
             }))
@@ -792,26 +882,11 @@ impl Render for Workspace {
                     cx.notify();
                 }
             }))
-            .capture_any_mouse_up(cx.listener(|this, e: &gpui::MouseUpEvent, window, cx| {
-                match e.button {
-                    MouseButton::Right => {
-                        this.hold = None;
-                        if this.lift.is_some() {
-                            this.drop_panel(window, cx);
-                            // The release ends the move; it must not also open a context menu.
-                            cx.stop_propagation();
-                        }
-                    }
-                    MouseButton::Left if this.resize.is_some() => {
-                        this.commit_resize(cx);
-                        cx.stop_propagation();
-                    }
-                    _ => {}
-                }
-            }))
-            .on_mouse_move(
-                cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| this.on_mouse_move(e, cx)),
-            )
+            // Moves and releases are watched for the whole window, not just while the
+            // pointer is over the workspace: a lifted panel can be carried past the window's
+            // edge to pop it out, and a resize can overshoot, and both must still see the
+            // release out there.
+            .child(self.pointer_watch(cx))
             .when(self.resize.is_some(), |el| el.cursor_col_resize())
             .when(lift.is_some(), |el| el.cursor_grabbing())
             .child(row);
@@ -848,7 +923,7 @@ impl Render for Workspace {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(icon(Icon::Screen).size(px(18.)))
                             .child(format!(
-                                "Drop here to open the {} in its own window",
+                                "Drop here or outside the window to open the {} on its own",
                                 l.panel.label().to_lowercase()
                             ))
                             .child(

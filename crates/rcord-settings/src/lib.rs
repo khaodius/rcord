@@ -143,6 +143,36 @@ pub struct Appearance {
     pub panel_borders: bool,
     /// The custom theme, used when `theme` is `custom`.
     pub custom_theme: Option<ThemeFile>,
+    /// Draws rcord's own title bar with minimize, maximize and close instead of the system's.
+    pub custom_title_bar: bool,
+    /// What the button at the top of the server list shows.
+    pub home_icon: HomeIcon,
+    /// The picture for [`HomeIcon::Image`].
+    pub home_icon_path: Option<String>,
+}
+
+/// The picture on the Home button at the top of the server list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HomeIcon {
+    #[default]
+    Logo,
+    Friends,
+    Avatar,
+    Image,
+}
+
+impl HomeIcon {
+    pub const ALL: [Self; 4] = [Self::Logo, Self::Friends, Self::Avatar, Self::Image];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Logo => "rcord logo",
+            Self::Friends => "Friends",
+            Self::Avatar => "Your avatar",
+            Self::Image => "A picture",
+        }
+    }
 }
 
 impl Default for Appearance {
@@ -166,6 +196,11 @@ impl Default for Appearance {
             server_names: false,
             panel_borders: false,
             custom_theme: None,
+            // Wayland compositors such as GNOME draw no title bar for rcord at all, so Linux
+            // gets rcord's own by default; Windows keeps the system one.
+            custom_title_bar: cfg!(target_os = "linux"),
+            home_icon: HomeIcon::Logo,
+            home_icon_path: None,
         }
     }
 }
@@ -482,6 +517,9 @@ pub struct Layout {
     pub order: Vec<PanelId>,
     pub hidden: Vec<PanelId>,
     pub widths: BTreeMap<PanelId, f32>,
+    /// Server IDs in the order dragged into the server list. Servers not listed follow in
+    /// Discord's order.
+    pub guild_order: Vec<u64>,
 }
 
 impl Default for Layout {
@@ -490,6 +528,7 @@ impl Default for Layout {
             order: PanelId::ALL.to_vec(),
             hidden: Vec::new(),
             widths: BTreeMap::new(),
+            guild_order: Vec::new(),
         }
     }
 }

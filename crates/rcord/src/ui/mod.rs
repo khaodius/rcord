@@ -13,6 +13,8 @@ pub mod profile;
 pub mod servers;
 pub mod settings;
 pub mod text_input;
+pub mod title_bar;
+pub mod video;
 pub mod workspace;
 
 use gpui::{
