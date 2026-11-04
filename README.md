@@ -273,7 +273,9 @@ The workspace is split so most of the client is tested without a window:
 | [`rcord-webview`](crates/rcord-webview)   | The small Discord window for captchas and web sign-in       |
 
 `third_party/xattr` is xattr 0.2.3 with one constant changed so it builds against current libc on
-Linux; [its README](third_party/xattr/README.md) explains why.
+Linux; [its README](third_party/xattr/README.md) explains why. `third_party/pipewire` holds the
+PipeWire 1.0 headers that Linux builds on Ubuntu 22.04 generate their bindings from
+([README](third_party/pipewire/README.md)).
 
 To release, set the new version in `[workspace.package]` of `Cargo.toml`, run `cargo check` to
 update `Cargo.lock`, add a section to [CHANGELOG.md](CHANGELOG.md) and merge to `main`. The

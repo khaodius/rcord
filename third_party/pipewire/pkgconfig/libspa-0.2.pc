@@ -1,0 +1,6 @@
+includedir=${pcfiledir}/../include
+
+Name: libspa
+Description: Simple Plugin API (headers bundled with rcord)
+Version: 0.2
+Cflags: -I${includedir}/spa-0.2 -D_REENTRANT

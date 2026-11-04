@@ -1,0 +1,8 @@
+includedir=${pcfiledir}/../include
+
+Name: libpipewire
+Description: PipeWire Interface (headers bundled with rcord; links the system library)
+Version: 1.0.5
+Requires: libspa-0.2
+Libs: -lpipewire-0.3
+Cflags: -I${includedir}/pipewire-0.3 -D_REENTRANT
