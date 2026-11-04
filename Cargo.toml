@@ -4,7 +4,7 @@ members = ["crates/*"]
 default-members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.6"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -17,6 +17,7 @@ rcord-auth = { path = "crates/rcord-auth" }
 rcord-capture = { path = "crates/rcord-capture" }
 rcord-gateway = { path = "crates/rcord-gateway" }
 rcord-markup = { path = "crates/rcord-markup" }
+rcord-media = { path = "crates/rcord-media" }
 rcord-model = { path = "crates/rcord-model" }
 rcord-rest = { path = "crates/rcord-rest" }
 rcord-settings = { path = "crates/rcord-settings" }

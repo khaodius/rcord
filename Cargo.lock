@@ -165,6 +165,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "380962b3d93b99642e50b9febf72c071e97e8b32d86eae9cf4ef582bb960ae6e"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4244,6 +4253,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyboard-types"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
+dependencies = [
+ "bitflags 2.13.2",
+ "serde",
+]
+
+[[package]]
 name = "keyring"
 version = "3.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4276,6 +4295,26 @@ name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
+
+[[package]]
+name = "ksni"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bcc1cb43797140f74b711f1c4a49f48a7a7429f211c5fb78264e7bcd1e99caf"
+dependencies = [
+ "arc-swap",
+ "async-executor",
+ "async-io",
+ "async-lock",
+ "crossbeam-queue",
+ "futures-channel",
+ "futures-lite 2.6.1",
+ "futures-util",
+ "pastey 0.2.3",
+ "serde",
+ "task-local",
+ "zbus 5.19.0",
+]
 
 [[package]]
 name = "kurbo"
@@ -4922,6 +4961,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "mp4"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9ef834d5ed55e494a2ae350220314dc4aacd1c43a9498b00e320e0ea352a5c3"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "num-rational",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "muda"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
+dependencies = [
+ "crossbeam-channel",
+ "dpi",
+ "keyboard-types",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "png 0.18.1",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "multiversion_no_op"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5190,6 +5261,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -6768,7 +6840,7 @@ dependencies = [
 
 [[package]]
 name = "rcord"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -6777,6 +6849,7 @@ dependencies = [
  "gpui_http_client",
  "http",
  "image",
+ "ksni",
  "libc",
  "parking_lot 0.12.5",
  "qrcode",
@@ -6784,6 +6857,7 @@ dependencies = [
  "rcord-capture",
  "rcord-gateway",
  "rcord-markup",
+ "rcord-media",
  "rcord-model",
  "rcord-rest",
  "rcord-settings",
@@ -6797,13 +6871,14 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "tray-icon",
  "unicode-segmentation",
  "winresource",
 ]
 
 [[package]]
 name = "rcord-auth"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -6821,7 +6896,7 @@ dependencies = [
 
 [[package]]
 name = "rcord-capture"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "ashpd 0.13.13",
  "pipewire",
@@ -6833,7 +6908,7 @@ dependencies = [
 
 [[package]]
 name = "rcord-gateway"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "async-channel 2.5.0",
  "bitflags 2.13.2",
@@ -6850,14 +6925,28 @@ dependencies = [
 
 [[package]]
 name = "rcord-markup"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "time",
 ]
 
 [[package]]
+name = "rcord-media"
+version = "0.1.6"
+dependencies = [
+ "async-channel 2.5.0",
+ "cpal",
+ "mp4",
+ "openh264",
+ "parking_lot 0.12.5",
+ "symphonia",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "rcord-model"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "bitflags 2.13.2",
  "serde",
@@ -6867,7 +6956,7 @@ dependencies = [
 
 [[package]]
 name = "rcord-rest"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6883,7 +6972,7 @@ dependencies = [
 
 [[package]]
 name = "rcord-settings"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "directories",
  "serde",
@@ -6893,7 +6982,7 @@ dependencies = [
 
 [[package]]
 name = "rcord-store"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "rcord-model",
  "rustc-hash 2.1.3",
@@ -6904,7 +6993,7 @@ dependencies = [
 
 [[package]]
 name = "rcord-voice"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "aes-gcm",
  "async-channel 2.5.0",
@@ -6928,7 +7017,7 @@ dependencies = [
 
 [[package]]
 name = "rcord-webview"
-version = "0.1.4"
+version = "0.1.6"
 dependencies = [
  "serde_json",
  "tao",
@@ -8201,6 +8290,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "symphonia"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5773a4c030a19d9bfaa090f49746ff35c75dfddfa700df7a5939d5e076a57039"
+dependencies = [
+ "lazy_static",
+ "symphonia-codec-aac",
+ "symphonia-core",
+ "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonia-codec-aac"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c263845aa86881416849c1729a54c7f55164f8b96111dba59de46849e73a790"
+dependencies = [
+ "lazy_static",
+ "log",
+ "symphonia-core",
+]
+
+[[package]]
+name = "symphonia-core"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea00cc4f79b7f6bb7ff87eddc065a1066f3a43fe1875979056672c9ef948c2af"
+dependencies = [
+ "arrayvec",
+ "bitflags 1.3.2",
+ "bytemuck",
+ "lazy_static",
+ "log",
+]
+
+[[package]]
+name = "symphonia-metadata"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36306ff42b9ffe6e5afc99d49e121e0bd62fe79b9db7b9681d48e29fa19e6b16"
+dependencies = [
+ "encoding_rs",
+ "lazy_static",
+ "log",
+ "symphonia-core",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8415,6 +8552,15 @@ name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
+
+[[package]]
+name = "task-local"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2972044a9e5e448a506a7ff6f0d03b566d8ef4cd6918a58fc59835a0f8666626"
+dependencies = [
+ "pin-project-lite",
+]
 
 [[package]]
 name = "tempfile"
@@ -8963,6 +9109,25 @@ checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
 dependencies = [
  "num-integer",
  "strength_reduce",
+]
+
+[[package]]
+name = "tray-icon"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f5cc5858ecf9574ddd8f0032a2ff7ffd6f7724d2b81e48b9374984b3fd6ddc9"
+dependencies = [
+ "crossbeam-channel",
+ "muda",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "once_cell",
+ "png 0.18.1",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

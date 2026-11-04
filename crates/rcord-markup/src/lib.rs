@@ -402,14 +402,16 @@ fn find_closing(s: &str, delim: &str) -> Option<usize> {
     while i < bytes.len() {
         match bytes[i] {
             b'\\' => i += 2,
-            b'`' => match s[i + 1..].find('`') {
+            // Byte comparisons throughout: `i` can land inside a multi-byte character after
+            // an escape, where slicing the `str` would panic.
+            b'`' => match bytes[i + 1..].iter().position(|b| *b == b'`') {
                 Some(end) => i += end + 2,
                 None => i += 1,
             },
-            _ if s[i..].starts_with(delim) && i > 0 => {
+            _ if bytes[i..].starts_with(delim.as_bytes()) && i > 0 => {
                 // In `**b *c***` the bold closes on the last two stars, after the italic.
                 let mut end = i;
-                while s[end + 1..].starts_with(delim) && delim.len() > 1 {
+                while bytes[end + 1..].starts_with(delim.as_bytes()) && delim.len() > 1 {
                     end += 1;
                 }
                 return Some(end);
@@ -625,6 +627,70 @@ fn write_plain(inlines: &[Inline], out: &mut String) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn multibyte_text_after_markers_does_not_panic() {
+        parse("```rust\n||-# ```rust\n(\u{1F600}<*\u{1F600}**> (\u{e9}");
+    }
+
+    /// Random mixes of markers and multi-byte text, the way a long channel scrolls past
+    /// them. Any panic here took the whole client down while rendering a message.
+    #[test]
+    fn random_markup_never_panics() {
+        let atoms = [
+            "*",
+            "**",
+            "_",
+            "__",
+            "~~",
+            "||",
+            "`",
+            "```",
+            "\n",
+            "> ",
+            ">>> ",
+            "# ",
+            "-# ",
+            "- ",
+            "1. ",
+            "<@1>",
+            "<#2>",
+            "<t:5:R>",
+            "<a:x:3>",
+            "[a](http://x)",
+            "\u{e9}",
+            "\u{65e5}",
+            "\u{1F600}",
+            "\\",
+            "@everyone",
+            "http://e.com",
+            "<",
+            ">",
+            "]",
+            "(",
+            ")",
+            ":",
+            "a",
+            " ",
+            "<@&",
+            "<t:",
+            "```rust\n",
+            "[",
+            "\t",
+        ];
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        for _ in 0..40_000 {
+            let mut s = String::new();
+            for _ in 0..(seed % 24) as usize + 1 {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                s.push_str(atoms[(seed % atoms.len() as u64) as usize]);
+            }
+            is_jumbo(&parse(&s));
+            plain_text(&parse_inline(&s));
+        }
+    }
+
     use super::*;
 
     fn t(s: &str) -> Inline {

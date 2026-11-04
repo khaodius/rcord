@@ -94,6 +94,7 @@ pub enum Overlay {
         selected: usize,
         preset: crate::golive::StreamPreset,
     },
+    Video(crate::ui::video::VideoSource),
 }
 
 #[derive(Debug, Clone)]

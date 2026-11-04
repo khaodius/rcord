@@ -22,6 +22,7 @@ use crate::ui::anim_img;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::markup::{self, MarkupAction, MarkupCx};
 use crate::ui::text_input::{InputEvent, TextInput};
+use crate::ui::video::VideoSource;
 use crate::ui::{Tooltip, avatar, icon_button, should_animate, snowflake_id, user_avatar_url};
 
 /// Messages from one author within this window are grouped under one header.
@@ -1307,6 +1308,15 @@ fn attachment(a: &Attachment, max_h: f32, t: &Theme, message: Snowflake) -> AnyE
             )
         };
         let url = a.url.clone();
+        let video = (a.is_video()
+            && VideoSource::playable(&a.filename, a.content_type.as_deref(), a.size))
+        .then(|| VideoSource {
+            url: a.url.clone(),
+            filename: a.filename.clone(),
+            size: a.size,
+            width: a.width.unwrap_or(0),
+            height: a.height.unwrap_or(0),
+        });
         let spoiler = a.is_spoiler();
         return div()
             .id(gpui::ElementId::NamedInteger(
@@ -1348,7 +1358,15 @@ fn attachment(a: &Attachment, max_h: f32, t: &Theme, message: Snowflake) -> AnyE
                         ),
                 )
             })
-            .on_click(move |_, _, cx| cx.open_url(&url))
+            .on_click(move |_, _, cx| match &video {
+                Some(source) => match cx.try_global::<crate::MainState>().map(|m| m.0.clone()) {
+                    Some(state) => state.update(cx, |s, cx| {
+                        s.set_overlay(Some(Overlay::Video(source.clone())), cx)
+                    }),
+                    None => cx.open_url(&url),
+                },
+                None => cx.open_url(&url),
+            })
             .into_any_element();
     }
     let url = a.url.clone();

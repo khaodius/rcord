@@ -10,12 +10,14 @@ mod memory;
 mod net;
 mod state;
 mod theme;
+mod tray;
 mod ui;
 mod update;
 mod voice;
 mod webview;
 
 use std::borrow::Cow;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
@@ -88,6 +90,7 @@ impl Root {
                 }
                 StateEvent::Settings => {
                     let s = state.read(cx);
+                    window.request_decorations(decorations(&s.settings));
                     let budget = s.settings.advanced.image_cache_mb as usize * 1024 * 1024;
                     window.set_rem_size(px(16.0 * s.settings.appearance.ui_scale));
                     this.images.update(cx, |c, _| c.set_budget(budget));
@@ -96,8 +99,11 @@ impl Root {
                 _ => {}
             },
         )];
+        // Once per run: the window can be reopened from the tray.
+        static CHECKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         let check = state.read(cx).settings.advanced.check_for_updates
-            && std::env::var_os("RCORD_DEMO").is_none();
+            && std::env::var_os("RCORD_DEMO").is_none()
+            && !CHECKED.swap(true, std::sync::atomic::Ordering::Relaxed);
         let mut this = Self {
             state: state.clone(),
             images,
@@ -352,7 +358,7 @@ impl Root {
 }
 
 impl Render for Root {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let screen = self.state.read(cx).screen.clone();
         let body = match screen {
             Screen::Main => self.workspace.clone().map(|w| w.into_any_element()),
@@ -367,13 +373,153 @@ impl Render for Root {
             _ => None,
         };
         let prompt = self.update_prompt(cx);
+        let custom_bar = self.state.read(cx).settings.appearance.custom_title_bar;
+        let bar = custom_bar.then(|| {
+            let t = theme(cx).clone();
+            ui::title_bar::title_bar("rcord", window, &t, Rc::new(close_main_window))
+        });
         div()
             .size_full()
-            .relative()
+            .flex()
+            .flex_col()
             .image_cache(self.images.clone())
-            .child(body.unwrap_or_else(|| self.splash(cx).into_any_element()))
-            .children(prompt)
+            .children(bar)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(body.unwrap_or_else(|| self.splash(cx).into_any_element()))
+                    .children(prompt),
+            )
+            .when(custom_bar, |el| {
+                el.child(ui::title_bar::resize_grips(window))
+            })
     }
+}
+
+/// The app state, for reopening the main window from the tray.
+pub struct MainState(pub Entity<AppState>);
+
+impl Global for MainState {}
+
+struct TraySender(async_channel::Sender<tray::TrayEvent>);
+
+impl Global for TraySender {}
+
+/// Shows the tray icon while "Close to tray" is on, and removes it when it is turned off.
+fn sync_tray(cx: &mut App) {
+    let wanted = cx
+        .try_global::<MainState>()
+        .is_some_and(|m| m.0.read(cx).settings.advanced.close_to_tray);
+    let running = cx.has_global::<tray::Tray>();
+    if wanted && !running {
+        let tx = cx.global::<TraySender>().0.clone();
+        if let Some(t) = tray::start(tx) {
+            cx.set_global(t);
+        }
+    } else if !wanted && running {
+        cx.remove_global::<tray::Tray>();
+    }
+}
+
+/// rcord's own title bar asks the compositor for client-side decorations on Linux.
+pub fn decorations(settings: &Settings) -> gpui::WindowDecorations {
+    if settings.appearance.custom_title_bar && cfg!(target_os = "linux") {
+        gpui::WindowDecorations::Client
+    } else {
+        gpui::WindowDecorations::Server
+    }
+}
+
+/// Popped-out panels close with the main window.
+fn close_panel_windows(cx: &mut App) {
+    for w in cx.windows() {
+        if let Some(p) = w.downcast::<ui::panel_window::PanelWindow>() {
+            p.update(cx, |_, window, _| window.remove_window()).ok();
+        }
+    }
+}
+
+/// The close button of rcord's own title bar, which does what the system's would.
+fn close_main_window(window: &mut Window, cx: &mut App) {
+    close_panel_windows(cx);
+    window.remove_window();
+}
+
+/// Brings the main window forward, opening it again if it was closed to the tray.
+fn show_main_window(cx: &mut App) {
+    if let Some(w) = cx.windows().into_iter().find_map(|w| w.downcast::<Root>()) {
+        w.update(cx, |_, window, _| window.activate_window()).ok();
+        return;
+    }
+    let Some(state) = cx.try_global::<MainState>().map(|m| m.0.clone()) else {
+        return;
+    };
+    if let Err(e) = open_main_window(state, false, cx) {
+        tracing::error!("could not open the window: {e}");
+    }
+}
+
+fn open_main_window(
+    state: Entity<AppState>,
+    minimized: bool,
+    cx: &mut App,
+) -> anyhow::Result<gpui::WindowHandle<Root>> {
+    let settings = &state.read(cx).settings;
+    let scale = settings.appearance.ui_scale;
+    let custom_bar = settings.appearance.custom_title_bar;
+    let window_decorations = Some(decorations(settings));
+    let options = WindowOptions {
+        titlebar: Some(TitlebarOptions {
+            title: Some("rcord".into()),
+            appears_transparent: custom_bar,
+            ..Default::default()
+        }),
+        window_decorations,
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(1280.), px(800.)),
+            cx,
+        ))),
+        window_min_size: Some(size(px(940.), px(520.))),
+        app_id: Some("rcord".into()),
+        focus: !minimized,
+        show: true,
+        ..Default::default()
+    };
+    let handle = cx.open_window(options, move |window, cx| {
+        window.set_rem_size(px(16.0 * scale));
+        if minimized {
+            window.minimize_window();
+        }
+        window.on_window_should_close(cx, |_, cx| {
+            close_panel_windows(cx);
+            true
+        });
+        cx.new(|cx| Root::new(state, window, cx))
+    })?;
+    cx.activate(true);
+    Ok(handle)
+}
+
+/// Writes the panic message and a backtrace to `path` before the process ends, so a crash
+/// on a desktop without a terminal still leaves something to report.
+fn install_crash_log(path: std::path::PathBuf) {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let text = format!(
+            "rcord {} crashed at {}\n{info}\n\n{backtrace}\n",
+            env!("CARGO_PKG_VERSION"),
+            time::OffsetDateTime::now_utc(),
+        );
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&path, text);
+        default(info);
+    }));
 }
 
 fn load_settings(paths: Option<&Paths>) -> Settings {
@@ -400,6 +546,9 @@ fn main() {
         .init();
 
     let paths = Paths::detect();
+    if let Some(p) = &paths {
+        install_crash_log(p.config_dir.join("crash.log"));
+    }
     let settings = load_settings(paths.as_ref());
     let demo = std::env::var_os("RCORD_DEMO").is_some();
     std::thread::Builder::new()
@@ -456,41 +605,36 @@ fn main() {
                 tracing::warn!("could not load bundled fonts: {e}");
             }
             rebind_keys(&settings.keybinds, cx);
-            // Popped-out panels close with the main window.
+            let minimized = settings.advanced.start_minimized;
+            let state = state::init(settings, paths, cx);
+            cx.set_global(MainState(state.clone()));
+            let (tray_tx, tray_rx) = async_channel::unbounded();
+            cx.set_global(TraySender(tray_tx));
+            cx.spawn(async move |cx| {
+                while let Ok(event) = tray_rx.recv().await {
+                    let quit = cx
+                        .update(|cx| match event {
+                            tray::TrayEvent::Show => show_main_window(cx),
+                            tray::TrayEvent::Quit => cx.quit(),
+                        })
+                        .is_err();
+                    if quit {
+                        break;
+                    }
+                }
+            })
+            .detach();
+            sync_tray(cx);
+            cx.observe(&state, |_, cx| sync_tray(cx)).detach();
+            // With no main window left, rcord quits, unless it lives on in the tray.
             cx.on_window_closed(|cx| {
-                if cx.windows().iter().all(|w| w.downcast::<Root>().is_none()) {
+                let main_open = cx.windows().iter().any(|w| w.downcast::<Root>().is_some());
+                if !main_open && !cx.has_global::<tray::Tray>() {
                     cx.quit();
                 }
             })
             .detach();
-
-            let scale = settings.appearance.ui_scale;
-            let minimized = settings.advanced.start_minimized;
-            let options = WindowOptions {
-                titlebar: Some(TitlebarOptions {
-                    title: Some("rcord".into()),
-                    ..Default::default()
-                }),
-                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                    None,
-                    size(px(1280.), px(800.)),
-                    cx,
-                ))),
-                window_min_size: Some(size(px(940.), px(520.))),
-                app_id: Some("rcord".into()),
-                focus: !minimized,
-                show: true,
-                ..Default::default()
-            };
-            let result = cx.open_window(options, move |window, cx| {
-                window.set_rem_size(px(16.0 * scale));
-                if minimized {
-                    window.minimize_window();
-                }
-                let state = state::init(settings, paths, cx);
-                cx.new(|cx| Root::new(state, window, cx))
-            });
-            if let Err(e) = result {
+            if let Err(e) = open_main_window(state, minimized, cx) {
                 eprintln!("rcord: could not open a window: {e}");
                 cx.quit();
             }

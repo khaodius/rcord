@@ -62,7 +62,7 @@ impl PanelWindow {
 }
 
 impl Render for PanelWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
         let panel = self.panel;
         let workspace = self.workspace.clone();
@@ -76,47 +76,61 @@ impl Render for PanelWindow {
         if let Some(images) = cx.try_global::<SharedImages>() {
             root = root.image_cache(images.0.clone());
         }
-        root.child(
-            div()
-                .flex_none()
-                .h(px(32.))
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .border_b_1()
-                .border_color(t.border)
-                .child(
-                    div()
-                        .flex_1()
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(t.text_faint)
-                        .child(panel.label().to_uppercase()),
-                )
-                .child(
-                    div()
-                        .id("dock")
-                        .h(px(22.))
-                        .px(px(8.))
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .rounded(t.radius_small)
-                        .cursor_pointer()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(t.text_muted)
-                        .hover(|s| s.bg(t.hover).text_color(t.header))
-                        .tooltip(|_, cx| Tooltip::view("Put back in the main window", cx))
-                        .child(icon(Icon::Logout).size(px(14.)))
-                        .child("Dock")
-                        .on_click(move |_, window, cx| {
-                            workspace.update(cx, |w, cx| w.docked(panel, cx)).ok();
-                            window.remove_window();
-                        }),
-                ),
-        )
-        .child(div().flex_1().min_h_0().child(self.view.clone()))
+        root.child(crate::ui::title_bar::resize_grips(window))
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(32.))
+                    .px(px(10.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .border_b_1()
+                    .border_color(t.border)
+                    .child(
+                        // The header moves the window, since it may have no system title bar.
+                        div()
+                            .id("panel-drag")
+                            .flex_1()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .when(cfg!(windows), |el| {
+                                el.window_control_area(gpui::WindowControlArea::Drag)
+                            })
+                            .when(!cfg!(windows), |el| {
+                                el.on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                                    window.start_window_move()
+                                })
+                            })
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(t.text_faint)
+                            .child(panel.label().to_uppercase()),
+                    )
+                    .child(
+                        div()
+                            .id("dock")
+                            .h(px(22.))
+                            .px(px(8.))
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .rounded(t.radius_small)
+                            .cursor_pointer()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(t.text_muted)
+                            .hover(|s| s.bg(t.hover).text_color(t.header))
+                            .tooltip(|_, cx| Tooltip::view("Put back in the main window", cx))
+                            .child(icon(Icon::Logout).size(px(14.)))
+                            .child("Dock")
+                            .on_click(move |_, window, cx| {
+                                workspace.update(cx, |w, cx| w.docked(panel, cx)).ok();
+                                window.remove_window();
+                            }),
+                    ),
+            )
+            .child(div().flex_1().min_h_0().child(self.view.clone()))
     }
 }

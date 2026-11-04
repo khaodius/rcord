@@ -50,6 +50,15 @@ pub enum Icon {
     Message,
     UserPlus,
     Gamepad,
+    Minimize,
+    Maximize,
+    Restore,
+    Play,
+    Pause,
+    VolumeOff,
+    Volume,
+    External,
+    Expand,
     ChevronUp,
     Logout,
     Shield,
@@ -90,6 +99,15 @@ impl Icon {
             Self::Message => "message",
             Self::UserPlus => "user-plus",
             Self::Gamepad => "gamepad",
+            Self::Minimize => "minimize",
+            Self::Maximize => "maximize",
+            Self::Restore => "restore",
+            Self::Play => "play",
+            Self::Pause => "pause",
+            Self::VolumeOff => "volume-off",
+            Self::Volume => "volume",
+            Self::External => "external",
+            Self::Expand => "expand",
             Self::ChevronRight => "chevron-right",
             Self::Bell => "bell",
             Self::Inbox => "inbox",
@@ -196,13 +214,28 @@ impl Icon {
             Self::UserPlus => {
                 r#"<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>"#
             }
+            Self::Minimize => r#"<path d="M6 12h12"/>"#,
+            Self::Maximize => r#"<rect x="6" y="6" width="12" height="12" rx="1"/>"#,
+            Self::Restore => {
+                r#"<rect x="5" y="9" width="10" height="10" rx="1"/><path d="M9 9V6a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-3"/>"#
+            }
+            Self::Play => r#"<path d="M7 4v16l13-8z"/>"#,
+            Self::Pause => r#"<path d="M8 5v14M16 5v14"/>"#,
+            Self::VolumeOff => r#"<path d="M4 9v6h3l5 4V5L7 9z"/><path d="m16 9 5 6M21 9l-5 6"/>"#,
+            Self::Volume => {
+                r#"<path d="M4 9v6h3l5 4V5L7 9z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>"#
+            }
+            Self::External => {
+                r#"<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>"#
+            }
+            Self::Expand => r#"<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>"#,
             Self::Gamepad => {
                 r#"<path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><rect x="2" y="6" width="20" height="12" rx="4"/>"#
             }
         }
     }
 
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 52] = [
         Self::Logo,
         Self::Hash,
         Self::Announcement,
@@ -243,6 +276,15 @@ impl Icon {
         Self::Message,
         Self::UserPlus,
         Self::Gamepad,
+        Self::Minimize,
+        Self::Maximize,
+        Self::Restore,
+        Self::Play,
+        Self::Pause,
+        Self::VolumeOff,
+        Self::Volume,
+        Self::External,
+        Self::Expand,
         Self::ChevronUp,
         Self::Logout,
         Self::Shield,

@@ -14,6 +14,8 @@ pub mod servers;
 pub mod settings;
 pub mod stream_view;
 pub mod text_input;
+pub mod title_bar;
+pub mod video;
 pub mod workspace;
 
 use gpui::{

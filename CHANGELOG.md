@@ -3,7 +3,7 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
-## Unreleased
+## 0.1.6 - 2026-11-04
 
 - **Voice channels show who is already in them** when rcord starts, instead of only people who
   joined afterwards. Participants rcord has no profile for yet are looked up.
@@ -19,6 +19,33 @@ Packages for every version are attached to its
   Settings.
 - **Automatic gain control** now works, and **Strong** noise suppression also cuts keyboard
   clicks and noises between words.
+
+## 0.1.5 - 2026-11-04
+
+- **Videos play in rcord**: clicking an MP4 or MOV video in chat opens a player over the window
+  instead of the browser. H.264 video (what phones, screen recorders and editors write) is
+  decoded with Cisco's OpenH264 and AAC sound with Symphonia, timed to the sound card so
+  picture and sound stay together. Play and pause, a seek bar you can click or drag, volume and
+  mute, and Fill the window. Keys: Space or K plays and pauses, Left and Right jump 5 seconds,
+  M mutes, F fills the window, Esc closes. Other formats (WebM, HEVC) say so and offer the
+  browser.
+- **Fixed a crash when scrolling** quickly through long channels. Some messages with emoji or
+  accented letters right after a formatting marker crashed the markup parser. If rcord ever
+  crashes now, the reason is written to `crash.log` in the config folder.
+- **Pop out by dragging**: drag a panel past the edge of the window and it leaves in its own
+  window right away, with the same animation as dropping it on the target.
+- **rcord title bar**: a slim bar with minimize, maximize and close, for desktops that draw no
+  title bar (on by default on Linux). Drag it to move the window, double-click to maximize,
+  and drag the window edges to resize. Toggle it in Settings > Appearance > Window; it works on
+  Windows too. Popped-out panels get the same edges and a draggable header.
+- **Close to tray works**: with it on, closing the window leaves rcord in the system tray
+  (StatusNotifier on Linux, the notification area on Windows). Click the icon or Open rcord to
+  bring it back, or Quit rcord from its menu.
+- **Server list**: drag servers to put them in your own order, which is saved. Server icons are
+  round.
+- **Home button**: choose what the top-left button shows in Settings > Appearance > Panels: the
+  rcord logo, the friends icon, your avatar or a picture of your own. Clicking it while on Home
+  opens Friends.
 
 ## 0.1.4 - 2026-11-04
 
