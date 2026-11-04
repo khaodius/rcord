@@ -158,6 +158,7 @@ pub(crate) fn offer(tx: &SyncSender<Frame>, frame: Frame) -> bool {
 }
 
 /// Copies rows of `stride` bytes into a tightly packed buffer.
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn pack_rows(src: &[u8], width: u32, height: u32, stride: usize) -> Option<Vec<u8>> {
     let row = width as usize * 4;
     if stride < row || src.len() < stride * (height as usize - 1) + row {
