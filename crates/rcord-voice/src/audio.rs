@@ -678,7 +678,7 @@ impl MediaLoop {
                 let mut p = 0.0f32;
                 let mut out = [0.0f32; nnnoiseless::FRAME_SIZE];
                 let mut scaled = [0.0f32; nnnoiseless::FRAME_SIZE];
-                for half in frame.chunks_exact_mut(nnnoiseless::FRAME_SIZE) {
+                for half in frame.as_chunks_mut::<{ nnnoiseless::FRAME_SIZE }>().0 {
                     for (d, s) in scaled.iter_mut().zip(half.iter()) {
                         *d = s * 32_768.0;
                     }
@@ -749,7 +749,7 @@ impl MediaLoop {
             match dev.out_channels {
                 2 => q.extend(out.iter().map(|s| soft_clip(s * gain))),
                 n => {
-                    for f in out.chunks_exact(2) {
+                    for f in out.as_chunks::<2>().0 {
                         let m = soft_clip((f[0] + f[1]) * 0.5 * gain);
                         let (l, r) = (soft_clip(f[0] * gain), soft_clip(f[1] * gain));
                         for c in 0..n {
