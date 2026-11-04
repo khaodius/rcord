@@ -5456,9 +5456,9 @@ dependencies = [
 
 [[package]]
 name = "openh264"
-version = "0.9.9"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e54411f498088327bf5c45d2de7e5b0ed25875ee3be5800485afe45da7206bff"
+checksum = "593512cbb853b55069ce9c667a9d12850407554185b65c0c9b4ee8cad37471c5"
 dependencies = [
  "openh264-sys2",
  "wide",
@@ -7102,9 +7102,9 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "safe_arch"
-version = "1.2.0"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
 dependencies = [
  "bytemuck",
 ]
@@ -9433,9 +9433,9 @@ dependencies = [
 
 [[package]]
 name = "wide"
-version = "1.7.1"
+version = "0.7.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
 dependencies = [
  "bytemuck",
  "safe_arch",

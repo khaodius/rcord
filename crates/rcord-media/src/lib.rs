@@ -347,7 +347,7 @@ fn to_frame(yuv: &openh264::decoder::DecodedYUV<'_>, at_ms: u64) -> VideoFrame {
     let (w, h) = yuv.dimensions();
     let mut bgra = vec![0u8; w * h * 4];
     yuv.write_rgba8(&mut bgra);
-    for px in bgra.chunks_exact_mut(4) {
+    for px in bgra.as_chunks_mut::<4>().0.iter_mut() {
         px.swap(0, 2);
     }
     VideoFrame {
