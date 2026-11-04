@@ -34,10 +34,27 @@ impl IpDiscovery {
     }
 }
 
-/// A fixed 12-byte RTP header, as used for Opus audio (payload type 120).
+/// The playout-delay extension element (ID 5) with no minimum or maximum delay, sent at the
+/// start of every encrypted video payload.
+pub const PLAYOUT_DELAY: [u8; 4] = [0x51, 0x00, 0x00, 0x00];
+
+/// An RTCP picture loss indication: asks the sender of `media_ssrc` for a new keyframe.
+/// The first eight bytes are the additional authenticated data when sealed.
+pub fn rtcp_pli(sender_ssrc: u32, media_ssrc: u32) -> ([u8; 8], [u8; 4]) {
+    let mut head = [0u8; 8];
+    head[0] = 0x81; // version 2, feedback message type 1 (PLI)
+    head[1] = 206; // payload-specific feedback
+    head[2..4].copy_from_slice(&2u16.to_be_bytes());
+    head[4..8].copy_from_slice(&sender_ssrc.to_be_bytes());
+    (head, media_ssrc.to_be_bytes())
+}
+
+/// A fixed 12-byte RTP header: Opus audio is payload type 120, H.264 video 101.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RtpHeader {
     pub payload_type: u8,
+    /// Set on the last packet of a video frame.
+    pub marker: bool,
     pub sequence: u16,
     pub timestamp: u32,
     pub ssrc: u32,
@@ -46,11 +63,13 @@ pub struct RtpHeader {
 impl RtpHeader {
     pub const LEN: usize = 12;
     pub const OPUS: u8 = 120;
+    pub const H264: u8 = 101;
+    pub const H264_RTX: u8 = 102;
 
     pub fn encode(&self) -> [u8; Self::LEN] {
         let mut h = [0u8; Self::LEN];
         h[0] = 0x80;
-        h[1] = self.payload_type & 0x7f;
+        h[1] = (self.payload_type & 0x7f) | if self.marker { 0x80 } else { 0 };
         h[2..4].copy_from_slice(&self.sequence.to_be_bytes());
         h[4..8].copy_from_slice(&self.timestamp.to_be_bytes());
         h[8..12].copy_from_slice(&self.ssrc.to_be_bytes());
@@ -76,12 +95,25 @@ impl RtpHeader {
         Some((
             Self {
                 payload_type: p[1] & 0x7f,
+                marker: p[1] & 0x80 != 0,
                 sequence: u16::from_be_bytes([p[2], p[3]]),
                 timestamp: u32::from_be_bytes(p[4..8].try_into().ok()?),
                 ssrc: u32::from_be_bytes(p[8..12].try_into().ok()?),
             },
             offset,
         ))
+    }
+
+    /// The header for a video packet: this header with its extension bit set, followed by
+    /// a one-byte-form extension header announcing one element. Discord's clients send the
+    /// playout-delay extension on every video packet; its element starts the payload, since
+    /// the `rtpsize` modes encrypt extension bodies.
+    pub fn encode_video(&self) -> [u8; Self::LEN + 4] {
+        let mut h = [0u8; Self::LEN + 4];
+        h[..Self::LEN].copy_from_slice(&self.encode());
+        h[0] |= 0x10;
+        h[12..16].copy_from_slice(&[0xbe, 0xde, 0x00, 0x01]);
+        h
     }
 
     /// Advances to the next 20 ms Opus frame at 48 kHz.
@@ -117,6 +149,7 @@ mod tests {
     fn rtp_round_trip() {
         let mut h = RtpHeader {
             payload_type: RtpHeader::OPUS,
+            marker: false,
             sequence: u16::MAX,
             timestamp: u32::MAX - 100,
             ssrc: 7,
@@ -126,5 +159,28 @@ mod tests {
         h.next_frame();
         assert_eq!(h.sequence, 0);
         assert_eq!(h.timestamp, 859);
+    }
+
+    #[test]
+    fn video_header_carries_marker_and_extension() {
+        let h = RtpHeader {
+            payload_type: RtpHeader::H264,
+            marker: true,
+            sequence: 1,
+            timestamp: 2,
+            ssrc: 3,
+        };
+        let bytes = h.encode_video();
+        assert_eq!(bytes[0], 0x90);
+        assert_eq!(bytes[1], 0x80 | 101);
+        assert_eq!(&bytes[12..], &[0xbe, 0xde, 0, 1]);
+        assert_eq!(RtpHeader::parse(&bytes), Some((h, 16)));
+    }
+
+    #[test]
+    fn pli_layout() {
+        let (head, media) = rtcp_pli(1, 2);
+        assert_eq!(head, [0x81, 206, 0, 2, 0, 0, 0, 1]);
+        assert_eq!(media, [0, 0, 0, 2]);
     }
 }

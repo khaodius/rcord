@@ -80,7 +80,7 @@ impl ChannelSidebar {
         let name = c.name.clone().unwrap_or_default();
         let is_voice = c.kind.is_voice();
         let dev = s.settings.advanced.developer_mode;
-        let voice: Vec<(Snowflake, String, String, bool, bool)> = if is_voice {
+        let voice: Vec<(Snowflake, String, String, bool, bool, bool)> = if is_voice {
             s.store
                 .voice_states_in(id)
                 .filter_map(|v| {
@@ -94,6 +94,7 @@ impl ChannelSidebar {
                         user_avatar_url(user, 24., false),
                         v.self_mute || v.mute,
                         v.self_deaf || v.deaf,
+                        v.self_stream,
                     ))
                 })
                 .collect()
@@ -186,8 +187,11 @@ impl ChannelSidebar {
                             .bg(t.header),
                     )
                 });
-        for (user, name, url, muted, deafened) in voice {
+        let watching_key = s.watching.as_ref().map(|w| w.streamer);
+        for (user, name, url, muted, deafened, live) in voice {
             let state = self.state.clone();
+            let watch_state = self.state.clone();
+            let watched = watching_key == Some(user);
             let speaking = talking.contains(&user);
             wrapper = wrapper.child(
                 div()
@@ -228,6 +232,41 @@ impl ChannelSidebar {
                     .when(muted, |el| el.child(icon(Icon::MicOff).size(px(16.))))
                     .when(deafened, |el| {
                         el.child(icon(Icon::HeadphonesOff).size(px(16.)))
+                    })
+                    .when(live, |el| {
+                        el.child(
+                            div()
+                                .id(snowflake_id("voice-live", user))
+                                .flex_none()
+                                .px(px(5.))
+                                .rounded(px(4.))
+                                .bg(t.danger)
+                                .text_color(gpui::white())
+                                .text_size(px(10.))
+                                .font_weight(FontWeight::BOLD)
+                                .cursor_pointer()
+                                .child("LIVE")
+                                .tooltip(move |_, cx| {
+                                    Tooltip::view(
+                                        if watched {
+                                            "Stop Watching"
+                                        } else {
+                                            "Watch Stream"
+                                        },
+                                        cx,
+                                    )
+                                })
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    watch_state.update(cx, |s, cx| {
+                                        if watched {
+                                            s.stop_watching(cx);
+                                        } else {
+                                            s.watch_stream(id, user, cx);
+                                        }
+                                    })
+                                }),
+                        )
                     })
                     .on_click(move |e, _, cx| {
                         let at = e.position();
@@ -494,6 +533,21 @@ impl ChannelSidebar {
         }
         let tip = detail.join("\n");
         let state = self.state.clone();
+        let share_state = self.state.clone();
+        let in_call = call.is_some();
+        let live = s.go_live.as_ref().map(|l| {
+            let viewers = l.viewers.len();
+            let status = match l.status {
+                crate::golive::StreamStatus::Live => l.preset.label().to_owned(),
+                crate::golive::StreamStatus::Reconnecting => "Reconnecting".to_owned(),
+                _ => "Starting".to_owned(),
+            };
+            match viewers {
+                0 => status,
+                1 => format!("{status} · 1 viewer"),
+                n => format!("{status} · {n} viewers"),
+            }
+        });
         Some(
             div()
                 .flex_none()
@@ -534,8 +588,49 @@ impl ChannelSidebar {
                                 .text_xs()
                                 .text_color(t.text_muted)
                                 .child(place),
-                        ),
+                        )
+                        .when_some(live.clone(), |el, live| {
+                            el.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.))
+                                    .text_xs()
+                                    .text_color(t.text_muted)
+                                    .child(
+                                        div()
+                                            .px(px(4.))
+                                            .rounded(px(3.))
+                                            .bg(t.danger)
+                                            .text_color(gpui::white())
+                                            .text_size(px(9.))
+                                            .font_weight(FontWeight::BOLD)
+                                            .child("LIVE"),
+                                    )
+                                    .child(div().truncate().child(live)),
+                            )
+                        }),
                 )
+                .when(in_call, |el| {
+                    let streaming = live.is_some();
+                    el.child(
+                        icon_button("voice-share", Icon::Screen, &t)
+                            .when(streaming, |b| b.text_color(t.online))
+                            .tooltip(move |_, cx| {
+                                Tooltip::view(
+                                    if streaming {
+                                        "Stop Streaming"
+                                    } else {
+                                        "Share Your Screen"
+                                    },
+                                    cx,
+                                )
+                            })
+                            .on_click(move |_, _, cx| {
+                                share_state.update(cx, |s, cx| s.toggle_go_live_picker(cx))
+                            }),
+                    )
+                })
                 .child(
                     icon_button("voice-leave", Icon::PhoneOff, &t)
                         .tooltip(|_, cx| Tooltip::view("Disconnect", cx))

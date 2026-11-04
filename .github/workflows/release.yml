@@ -90,7 +90,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev \
-            libwebkit2gtk-4.1-dev libasound2-dev
+            libwebkit2gtk-4.1-dev libasound2-dev libpipewire-0.3-dev libgbm-dev libclang-dev
+          # PipeWire bindings are generated from the 1.0 headers in third_party; see its README.
+          echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/third_party/pipewire/pkgconfig" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
 

@@ -232,6 +232,29 @@ pub struct RequestGuildMembers {
     pub presences: bool,
 }
 
+/// Starts this client's Go Live stream in its current voice channel.
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamCreate {
+    /// `"guild"` for a server voice channel, `"call"` for a direct call.
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub guild_id: Option<Snowflake>,
+    pub channel_id: Snowflake,
+    pub preferred_region: Option<String>,
+}
+
+/// Names a stream: `guild:{guild}:{channel}:{user}` or `call:{channel}:{user}`.
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamKey {
+    pub stream_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamSetPaused {
+    pub stream_key: String,
+    pub paused: bool,
+}
+
 /// Commands the client can send once connected.
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -239,6 +262,10 @@ pub enum Command {
     UpdateVoiceState(VoiceStateUpdate),
     SubscribeGuilds(GuildSubscriptionsBulk),
     RequestGuildMembers(RequestGuildMembers),
+    StreamCreate(StreamCreate),
+    StreamDelete(StreamKey),
+    StreamWatch(StreamKey),
+    StreamSetPaused(StreamSetPaused),
 }
 
 impl Command {
@@ -260,6 +287,22 @@ impl Command {
                 op: op::REQUEST_GUILD_MEMBERS,
                 d,
             }),
+            Self::StreamCreate(d) => serde_json::to_string(&Outgoing {
+                op: op::STREAM_CREATE,
+                d,
+            }),
+            Self::StreamDelete(d) => serde_json::to_string(&Outgoing {
+                op: op::STREAM_DELETE,
+                d,
+            }),
+            Self::StreamWatch(d) => serde_json::to_string(&Outgoing {
+                op: op::STREAM_WATCH,
+                d,
+            }),
+            Self::StreamSetPaused(d) => serde_json::to_string(&Outgoing {
+                op: op::STREAM_SET_PAUSED,
+                d,
+            }),
         }
     }
 }
@@ -276,6 +319,29 @@ mod tests {
         assert_eq!(p.s, Some(42));
         assert_eq!(p.t, Some("MESSAGE_CREATE"));
         assert_eq!(p.d.unwrap().get(), r#"{"id":"1"}"#);
+    }
+
+    #[test]
+    fn encodes_stream_commands() {
+        let g = Snowflake::new(1).unwrap();
+        let c = Snowflake::new(2).unwrap();
+        let create = Command::StreamCreate(StreamCreate {
+            kind: "guild",
+            guild_id: Some(g),
+            channel_id: c,
+            preferred_region: None,
+        });
+        assert_eq!(
+            create.encode().unwrap(),
+            r#"{"op":18,"d":{"type":"guild","guild_id":"1","channel_id":"2","preferred_region":null}}"#
+        );
+        let watch = Command::StreamWatch(StreamKey {
+            stream_key: "guild:1:2:3".into(),
+        });
+        assert_eq!(
+            watch.encode().unwrap(),
+            r#"{"op":20,"d":{"stream_key":"guild:1:2:3"}}"#
+        );
     }
 
     #[test]

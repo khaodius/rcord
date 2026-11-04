@@ -14,6 +14,7 @@ publish = false
 
 [workspace.dependencies]
 rcord-auth = { path = "crates/rcord-auth" }
+rcord-capture = { path = "crates/rcord-capture" }
 rcord-gateway = { path = "crates/rcord-gateway" }
 rcord-markup = { path = "crates/rcord-markup" }
 rcord-media = { path = "crates/rcord-media" }

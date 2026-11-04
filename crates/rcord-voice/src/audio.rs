@@ -129,6 +129,8 @@ pub enum Outbound {
     Opus(Vec<u8>),
     /// The microphone started or stopped transmitting.
     Speaking(bool),
+    /// An encoded video frame to send on a Go Live stream.
+    Video(crate::video::EncodedFrame),
 }
 
 /// Changes the app shows.

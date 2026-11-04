@@ -24,6 +24,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 parking_lot.workspace = true
 qrcode.workspace = true
 rcord-auth.workspace = true
+rcord-capture.workspace = true
 rcord-gateway.workspace = true
 rcord-markup.workspace = true
 rcord-media.workspace = true

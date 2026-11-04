@@ -1,0 +1,28 @@
+[package]
+name = "rcord-capture"
+description = "Screen capture for rcord's Go Live: the desktop portal and PipeWire on Wayland, X11, and Windows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+
+# Native Wayland goes through the ScreenCast desktop portal, which shows the compositor's own
+# picker, and reads frames from the PipeWire stream it hands back. X11 sessions use xcap.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast"] }
+pipewire = "0.10"
+tokio = { workspace = true, features = ["rt"] }
+xcap = "0.9"
+
+[target.'cfg(windows)'.dependencies]
+xcap = "0.9"
+
+[lints]
+workspace = true

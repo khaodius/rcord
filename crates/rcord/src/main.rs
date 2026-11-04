@@ -4,6 +4,7 @@
 
 mod build_number;
 mod demo;
+mod golive;
 mod image_cache;
 mod memory;
 mod net;

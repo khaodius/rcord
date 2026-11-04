@@ -20,7 +20,8 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 pub use inflate::ZlibStream;
 pub use protocol::{
     CHROME_VERSION, Capabilities, ClientProperties, Command, GuildSubscription,
-    GuildSubscriptionsBulk, PresenceUpdate, RequestGuildMembers, VoiceStateUpdate,
+    GuildSubscriptionsBulk, PresenceUpdate, RequestGuildMembers, StreamCreate, StreamKey,
+    StreamSetPaused, VoiceStateUpdate,
 };
 use protocol::{ClientState, Hello, Identify, Incoming, Outgoing, ReadySession, Resume, op};
 
