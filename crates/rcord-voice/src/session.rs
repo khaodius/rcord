@@ -138,6 +138,11 @@ impl VoiceHandle {
         self.engine.set_user_volume(user_id, volume);
     }
 
+    /// Volume for the sound of `streamer`'s stream, 0 to 2.
+    pub fn set_stream_volume(&self, streamer: u64, volume: f32) {
+        self.engine.set_stream_volume(streamer, volume);
+    }
+
     pub fn update_audio(&self, settings: AudioSettings) {
         self.engine.update_settings(settings);
     }
@@ -337,6 +342,8 @@ pub fn connect_stream(
         want_keyframe,
         keyframe_asked,
         last_pli: None,
+        watch_ssrc: None,
+        last_remb: None,
     };
     let target = Target {
         endpoint: config.endpoint.clone(),
@@ -506,6 +513,10 @@ struct Video {
     /// Set when a viewer asked us for a keyframe.
     keyframe_asked: Arc<AtomicBool>,
     last_pli: Option<Instant>,
+    /// When watching, the streamer's layer this client decodes; their other simulcast
+    /// layers are ignored.
+    watch_ssrc: Option<u32>,
+    last_remb: Option<Instant>,
 }
 
 struct Connection {
@@ -889,6 +900,28 @@ impl Connection {
                     }
                     self.dave.add_members(&[info.user_id]);
                     v.want_keyframe.store(true, Ordering::Relaxed);
+                    // A viewer asks for the streamer's best layer at full size. Without
+                    // this the server forwards a small preview layer.
+                    let wants = (v.decoder.is_some() && info.user_id == v.streamer)
+                        .then(|| info.best_layer())
+                        .flatten()
+                        .map(|(ssrc, pixels)| {
+                            v.watch_ssrc = Some(ssrc);
+                            let others: Vec<u32> = info.streams.iter().map(|s| s.ssrc).collect();
+                            let pixels = if pixels == 0 { 1920 * 1080 } else { pixels };
+                            json(
+                                VoiceOp::MediaSinkWants,
+                                &protocol::sink_wants(ssrc, pixels, &others),
+                            )
+                        });
+                    if let Some(msg) = wants {
+                        ws.send(WsMessage::Text(msg.into()))
+                            .await
+                            .map_err(|e| End::Resume {
+                                code: None,
+                                reason: e.to_string(),
+                            })?;
+                    }
                 }
             }
             VoiceOp::Speaking => {
@@ -1045,6 +1078,8 @@ impl Connection {
         };
         let _ = sink.send(Inbound {
             user_id,
+            // Only a stream connection carries video.
+            stream: self.video.is_some(),
             ssrc: header.ssrc,
             sequence: header.sequence,
             opus: opus.into_owned(),
@@ -1059,6 +1094,9 @@ impl Connection {
             return; // Sending only.
         };
         let user_id = v.senders.get(&header.ssrc).copied().unwrap_or(v.streamer);
+        if user_id == v.streamer && v.watch_ssrc.is_some_and(|w| w != header.ssrc) {
+            return; // Another layer of the same stream.
+        }
         let assembled = v.reassembly.entry(header.ssrc).or_default().push(
             header.sequence,
             header.timestamp,
@@ -1106,6 +1144,7 @@ impl Connection {
 
     /// Asks the streamer for a keyframe when the picture broke, at most once a second.
     async fn request_keyframe(&mut self) {
+        self.send_remb().await;
         let Some(v) = &mut self.video else {
             return;
         };
@@ -1123,12 +1162,15 @@ impl Connection {
         let Some(cipher) = &mut media.cipher else {
             return;
         };
-        let targets: Vec<u32> = v
-            .senders
-            .iter()
-            .filter(|(_, u)| **u == v.streamer)
-            .map(|(s, _)| *s)
-            .collect();
+        let targets: Vec<u32> = match v.watch_ssrc {
+            Some(ssrc) => vec![ssrc],
+            None => v
+                .senders
+                .iter()
+                .filter(|(_, u)| **u == v.streamer)
+                .map(|(s, _)| *s)
+                .collect(),
+        };
         if targets.is_empty() {
             return; // The streamer's SSRC is not known yet.
         }
@@ -1140,6 +1182,35 @@ impl Connection {
         }
         v.last_pli = Some(Instant::now());
         v.want_keyframe.store(false, Ordering::Relaxed);
+    }
+
+    /// Tells the media server, once a second, that this viewer can take a full quality
+    /// stream, so it is not held at the bitrate it starts at.
+    async fn send_remb(&mut self) {
+        /// Above the highest bitrate Discord streams at.
+        const RECEIVE_BPS: u64 = 12_000_000;
+        let Some(v) = &mut self.video else {
+            return;
+        };
+        let Some(ssrc) = v.watch_ssrc.filter(|_| v.decoder.is_some()) else {
+            return;
+        };
+        if v.last_remb
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(1))
+        {
+            return;
+        }
+        let Some(media) = &mut self.media else {
+            return;
+        };
+        let Some(cipher) = &mut media.cipher else {
+            return;
+        };
+        let (head, body) = rtp::rtcp_remb(media.ssrc, RECEIVE_BPS, ssrc);
+        if cipher.seal(&head, &body, &mut self.packet).is_ok() {
+            let _ = media.udp.send(&self.packet).await;
+        }
+        v.last_remb = Some(Instant::now());
     }
 
     /// After the session description: a sender announces its stream, a viewer asks for

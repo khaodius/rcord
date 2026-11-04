@@ -49,6 +49,30 @@ pub fn rtcp_pli(sender_ssrc: u32, media_ssrc: u32) -> ([u8; 8], [u8; 4]) {
     (head, media_ssrc.to_be_bytes())
 }
 
+/// A receiver estimated maximum bitrate message (REMB) telling the media server how much this
+/// client can receive, so it does not hold a stream at its starting bitrate. Returns the
+/// 8-byte header, which is the authenticated part, and the body.
+pub fn rtcp_remb(sender_ssrc: u32, bitrate_bps: u64, media_ssrc: u32) -> ([u8; 8], [u8; 16]) {
+    let mut head = [0u8; 8];
+    head[0] = 0x8f; // version 2, feedback message type 15 (application layer)
+    head[1] = 206; // payload-specific feedback
+    head[2..4].copy_from_slice(&5u16.to_be_bytes()); // 24 bytes, in words, minus one
+    head[4..8].copy_from_slice(&sender_ssrc.to_be_bytes());
+    let mut exp = 0u32;
+    let mut mantissa = bitrate_bps;
+    while mantissa >= 1 << 18 {
+        mantissa >>= 1;
+        exp += 1;
+    }
+    let mut body = [0u8; 16];
+    // Media SSRC stays 0, as REMB requires.
+    body[4..8].copy_from_slice(b"REMB");
+    let packed = (1u32 << 24) | (exp << 18) | mantissa as u32;
+    body[8..12].copy_from_slice(&packed.to_be_bytes());
+    body[12..16].copy_from_slice(&media_ssrc.to_be_bytes());
+    (head, body)
+}
+
 /// A fixed 12-byte RTP header: Opus audio is payload type 120, H.264 video 101.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RtpHeader {
@@ -175,6 +199,19 @@ mod tests {
         assert_eq!(bytes[1], 0x80 | 101);
         assert_eq!(&bytes[12..], &[0xbe, 0xde, 0, 1]);
         assert_eq!(RtpHeader::parse(&bytes), Some((h, 16)));
+    }
+
+    #[test]
+    fn remb_layout() {
+        let (head, body) = rtcp_remb(7, 12_000_000, 9);
+        assert_eq!(head[..4], [0x8f, 206, 0, 5]);
+        assert_eq!(&body[4..8], b"REMB");
+        assert_eq!(body[8], 1);
+        let packed = u32::from_be_bytes(body[8..12].try_into().unwrap());
+        let (exp, mantissa) = ((packed >> 18) & 0x3f, packed & 0x3_ffff);
+        let bps = u64::from(mantissa) << exp;
+        assert!(bps <= 12_000_000 && bps > 11_900_000);
+        assert_eq!(body[12..16], 9u32.to_be_bytes());
     }
 
     #[test]
