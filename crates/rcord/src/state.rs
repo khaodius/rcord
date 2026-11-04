@@ -88,6 +88,12 @@ pub enum Overlay {
     },
     Expressions(ExpressionTab),
     QuickSwitcher,
+    /// Choosing what to share and at what quality.
+    GoLive {
+        sources: Vec<rcord_capture::Source>,
+        selected: usize,
+        preset: crate::golive::StreamPreset,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +150,10 @@ pub struct AppState {
     pub(crate) gateway: Option<rcord_gateway::Handle>,
     /// The call this client is in, if any.
     pub call: Option<crate::voice::Call>,
+    /// This client's own Go Live stream.
+    pub go_live: Option<crate::golive::GoLive>,
+    /// The stream this client is watching.
+    pub watching: Option<crate::golive::Watching>,
     /// Voice participants whose profiles were requested, so each is asked for once.
     pub(crate) voice_members_requested: HashSet<Snowflake>,
     pump: Option<Task<()>>,
@@ -209,6 +219,8 @@ impl AppState {
             status: Status::Online,
             gateway: None,
             call: None,
+            go_live: None,
+            watching: None,
             voice_members_requested: HashSet::new(),
             pump: None,
             subscribed: BTreeMap::new(),
@@ -416,6 +428,7 @@ impl AppState {
     }
 
     pub fn sign_out(&mut self, cx: &mut Context<Self>) {
+        self.end_streams(cx);
         self.call = None;
         self.gateway = None;
         self.pump = None;
@@ -438,6 +451,7 @@ impl AppState {
         match event {
             NetEvent::Update(update) => {
                 self.voice_gateway_update(&update, cx);
+                self.stream_gateway_update(&update, cx);
                 let is_ready = matches!(*update, Update::Ready(_));
                 let big = is_ready || matches!(*update, Update::ReadySupplemental(_));
                 let change = self.store.apply(*update, now_ms());

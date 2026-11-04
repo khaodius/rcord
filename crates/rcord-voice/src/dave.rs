@@ -279,23 +279,52 @@ impl Dave {
     /// Encrypts an outgoing Opus frame. Returns it untouched when the call is not encrypted,
     /// and `None` while keys are not ready yet, since other members could not play it.
     pub fn encrypt_opus<'a>(&mut self, frame: &'a [u8]) -> Option<Cow<'a, [u8]>> {
+        self.encrypt(MediaType::AUDIO, Codec::OPUS, frame)
+    }
+
+    /// Encrypts an H.264 access unit in Annex B form. The NAL unit headers stay readable so
+    /// the frame can still be packetized; the rest is end-to-end encrypted.
+    pub fn encrypt_h264<'a>(&mut self, frame: &'a [u8]) -> Option<Cow<'a, [u8]>> {
+        self.encrypt(MediaType::VIDEO, Codec::H264, frame)
+    }
+
+    fn encrypt<'a>(
+        &mut self,
+        media: MediaType,
+        codec: Codec,
+        frame: &'a [u8],
+    ) -> Option<Cow<'a, [u8]>> {
         if self.protocol_version == 0 {
             return Some(Cow::Borrowed(frame));
         }
         let s = self.session.as_mut()?;
-        s.encrypt(MediaType::AUDIO, Codec::OPUS, frame).ok()
+        s.encrypt(media, codec, frame).ok()
     }
 
     /// Decrypts an incoming Opus frame from `user_id`. Unencrypted frames pass while the call
     /// is not encrypted or is moving into or out of encryption.
     pub fn decrypt_opus<'a>(&mut self, user_id: u64, frame: &'a [u8]) -> Option<Cow<'a, [u8]>> {
+        self.decrypt(user_id, MediaType::AUDIO, frame)
+    }
+
+    /// Decrypts a reassembled video frame from `user_id`.
+    pub fn decrypt_video<'a>(&mut self, user_id: u64, frame: &'a [u8]) -> Option<Cow<'a, [u8]>> {
+        self.decrypt(user_id, MediaType::VIDEO, frame)
+    }
+
+    fn decrypt<'a>(
+        &mut self,
+        user_id: u64,
+        media: MediaType,
+        frame: &'a [u8],
+    ) -> Option<Cow<'a, [u8]>> {
         let Some(s) = self.session.as_mut() else {
             return Some(Cow::Borrowed(frame));
         };
         if self.protocol_version == 0 && !s.is_ready() {
             return Some(Cow::Borrowed(frame));
         }
-        match s.decrypt(user_id, MediaType::AUDIO, frame) {
+        match s.decrypt(user_id, media, frame) {
             Ok(plain) => Some(Cow::Owned(plain)),
             Err(e) => {
                 if self.protocol_version == 0 || s.can_passthrough(user_id) {

@@ -1621,7 +1621,24 @@ impl Focusable for ChatView {
 }
 
 impl Render for ChatView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.render_body(window, cx);
+        // A watched stream sits above whatever the chat shows.
+        match crate::ui::stream_view::stream_panel(&self.state, cx) {
+            Some(stream) => div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(stream)
+                .child(div().flex_1().min_h_0().child(body))
+                .into_any_element(),
+            None => body,
+        }
+    }
+}
+
+impl ChatView {
+    fn render_body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
         let has_channel = self.state.read(cx).channel.is_some();
         if !has_channel {

@@ -18,7 +18,9 @@ pub enum VoiceOp {
     Hello = 8,
     Resumed = 9,
     ClientsConnect = 11,
+    Video = 12,
     ClientDisconnect = 13,
+    MediaSinkWants = 15,
     DavePrepareTransition = 21,
     DaveExecuteTransition = 22,
     DaveTransitionReady = 23,
@@ -47,7 +49,9 @@ impl VoiceOp {
             8 => Hello,
             9 => Resumed,
             11 => ClientsConnect,
+            12 => Video,
             13 => ClientDisconnect,
+            15 => MediaSinkWants,
             21 => DavePrepareTransition,
             22 => DaveExecuteTransition,
             23 => DaveTransitionReady,
@@ -176,6 +180,15 @@ pub struct StreamDescriptor {
     pub quality: u8,
 }
 
+impl StreamDescriptor {
+    /// The one full-quality layer of a Go Live stream.
+    pub const SCREEN: Self = Self {
+        kind: "screen",
+        rid: "100",
+        quality: 100,
+    };
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Hello {
     pub heartbeat_interval: f64,
@@ -201,12 +214,112 @@ pub struct Ready {
     pub ip: String,
     pub port: u16,
     pub modes: Vec<String>,
+    /// The SSRCs reserved for video, one per requested stream layer.
+    #[serde(default)]
+    pub streams: Vec<ReadyStream>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReadyStream {
+    pub ssrc: u32,
+    #[serde(default)]
+    pub rtx_ssrc: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SelectProtocol {
     pub protocol: &'static str,
     pub data: SelectProtocolData,
+    /// The codecs this client sends and receives; needed for video.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub codecs: Vec<Codec>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Codec {
+    pub name: &'static str,
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub priority: u32,
+    pub payload_type: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rtx_payload_type: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encode: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode: Option<bool>,
+}
+
+impl Codec {
+    pub const OPUS: Self = Self {
+        name: "opus",
+        kind: "audio",
+        priority: 1000,
+        payload_type: crate::rtp::RtpHeader::OPUS,
+        rtx_payload_type: None,
+        encode: None,
+        decode: None,
+    };
+    pub const H264: Self = Self {
+        name: "H264",
+        kind: "video",
+        priority: 1000,
+        payload_type: crate::rtp::RtpHeader::H264,
+        rtx_payload_type: Some(crate::rtp::RtpHeader::H264_RTX),
+        encode: Some(true),
+        decode: Some(true),
+    };
+}
+
+/// Announces (or, with zero SSRCs and no streams, withdraws) this client's video.
+#[derive(Debug, Clone, Serialize)]
+pub struct VideoOut {
+    pub audio_ssrc: u32,
+    pub video_ssrc: u32,
+    pub rtx_ssrc: u32,
+    pub streams: Vec<VideoStreamOut>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VideoStreamOut {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub rid: &'static str,
+    pub ssrc: u32,
+    pub active: bool,
+    pub quality: u8,
+    pub rtx_ssrc: u32,
+    pub max_bitrate: u32,
+    pub max_framerate: u32,
+    pub max_resolution: Resolution,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Resolution {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Another participant's video SSRCs.
+#[derive(Debug, Clone, Deserialize)]
+pub struct VideoIn {
+    #[serde(deserialize_with = "id_string")]
+    pub user_id: u64,
+    #[serde(default)]
+    pub audio_ssrc: u32,
+    #[serde(default)]
+    pub video_ssrc: u32,
+    #[serde(default)]
+    pub streams: Vec<VideoStreamIn>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VideoStreamIn {
+    pub ssrc: u32,
+    #[serde(default)]
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -371,6 +484,25 @@ mod tests {
     }
 
     #[test]
+    fn select_protocol_lists_codecs() {
+        let s = SelectProtocol {
+            protocol: "udp",
+            data: SelectProtocolData {
+                address: "1.2.3.4".into(),
+                port: 5,
+                mode: EncryptionMode::Aes256Gcm,
+            },
+            codecs: vec![Codec::OPUS, Codec::H264],
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["codecs"][0]["name"], "opus");
+        assert!(v["codecs"][0].get("rtx_payload_type").is_none());
+        assert_eq!(v["codecs"][1]["payload_type"], 101);
+        assert_eq!(v["codecs"][1]["rtx_payload_type"], 102);
+        assert_eq!(v["codecs"][1]["type"], "video");
+    }
+
+    #[test]
     fn binary_frames() {
         let frame = [0x01, 0x02, 25, 0xaa, 0xbb];
         let (seq, op, payload) = parse_binary(&frame).unwrap();
@@ -401,6 +533,16 @@ mod tests {
         .unwrap();
         assert_eq!(d.mode, EncryptionMode::Aes256Gcm);
         assert_eq!(d.dave_protocol_version, 1);
+        let v: VideoIn = serde_json::from_str(
+            r#"{"user_id":"7","audio_ssrc":1,"video_ssrc":2,"rtx_ssrc":3,"streams":[{"ssrc":2,"rtx_ssrc":3,"active":true,"rid":"100","quality":100}]}"#,
+        )
+        .unwrap();
+        assert_eq!((v.user_id, v.video_ssrc, v.streams[0].active), (7, 2, true));
+        let r: Ready = serde_json::from_str(
+            r#"{"ssrc":1,"ip":"1.2.3.4","port":5,"modes":[],"streams":[{"type":"screen","ssrc":2,"rtx_ssrc":3,"rid":"100","quality":100,"active":false}]}"#,
+        )
+        .unwrap();
+        assert_eq!((r.streams[0].ssrc, r.streams[0].rtx_ssrc), (2, 3));
         assert!(close::can_resume(close::VOICE_SERVER_CRASHED));
         assert!(!close::can_resume(close::DISCONNECTED));
     }

@@ -328,3 +328,33 @@ fn voice_channels_never_show_unread() {
     assert!(!store.tracks_unread(id(203)));
     assert!(store.tracks_unread(id(201)));
 }
+
+#[test]
+fn parses_stream_events() {
+    let raw = |s: &str| serde_json::value::RawValue::from_string(s.to_owned()).unwrap();
+    let Update::StreamCreate(c) = parse(
+        "STREAM_CREATE",
+        &raw(r#"{"stream_key":"guild:1:2:3","rtc_server_id":"999","region":"us-east","viewer_ids":["4"],"paused":false}"#),
+    )
+    .unwrap() else {
+        panic!("not a stream create");
+    };
+    assert_eq!(c.rtc_server_id, Some(999));
+    assert_eq!(c.viewer_ids.len(), 1);
+    let Update::StreamServerUpdate(s) = parse(
+        "STREAM_SERVER_UPDATE",
+        &raw(r#"{"stream_key":"guild:1:2:3","endpoint":"x.discord.media:443","token":"t","guild_id":null}"#),
+    )
+    .unwrap() else {
+        panic!("not a stream server update");
+    };
+    assert_eq!(s.endpoint.as_deref(), Some("x.discord.media:443"));
+    let Update::StreamDelete(d) = parse(
+        "STREAM_DELETE",
+        &raw(r#"{"stream_key":"guild:1:2:3","unavailable":false,"reason":"user_requested"}"#),
+    )
+    .unwrap() else {
+        panic!("not a stream delete");
+    };
+    assert_eq!(d.reason.as_deref(), Some("user_requested"));
+}

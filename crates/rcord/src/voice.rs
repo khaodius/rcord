@@ -45,6 +45,18 @@ pub struct Call {
 }
 
 impl Call {
+    /// The voice session ID, which stream connections identify with too.
+    pub(crate) fn session_id(&self) -> Option<String> {
+        self.session_id.clone()
+    }
+
+    /// Where a watched stream's sound is mixed in.
+    pub(crate) fn audio_sink(
+        &self,
+    ) -> Option<std::sync::mpsc::Sender<rcord_voice::audio::Inbound>> {
+        self.handle.as_ref().map(|h| h.audio_sink())
+    }
+
     fn new(guild: Option<Snowflake>, channel: Snowflake) -> Self {
         Self {
             guild,
@@ -133,6 +145,7 @@ impl AppState {
             .map(|c| c.guild)
             .or_else(|| self.store.my_voice_state().map(|v| v.guild_id))
             .flatten();
+        self.end_streams(cx);
         self.call = None;
         self.forget_my_voice_state(guild);
         if let Some(gw) = &self.gateway {
@@ -247,6 +260,7 @@ impl AppState {
                 match v.channel_id {
                     // Kicked, or left from another device.
                     None if call.status != CallStatus::Joining || call.session_id.is_some() => {
+                        self.end_streams(cx);
                         self.call = None;
                         cx.notify();
                         return;
@@ -398,9 +412,11 @@ impl AppState {
                 return; // Only the settings meter reads this; no redraw needed here.
             }
             VoiceEvent::DeviceError(e) => self.toast(e, cx),
+            VoiceEvent::VideoFrame => return,
             VoiceEvent::Closed { code, reason } => {
                 tracing::info!("voice closed ({code:?}): {reason}");
                 let guild = call.guild;
+                self.end_streams(cx);
                 self.call = None;
                 self.forget_my_voice_state(guild);
                 if reason != "Disconnected" {

@@ -12,6 +12,7 @@ pub mod panel_window;
 pub mod profile;
 pub mod servers;
 pub mod settings;
+pub mod stream_view;
 pub mod text_input;
 pub mod workspace;
 

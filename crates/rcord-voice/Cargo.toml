@@ -19,6 +19,9 @@ davey = "0.2"
 futures.workspace = true
 nnnoiseless = { version = "0.5", default-features = false }
 opus = "0.4"
+# OpenH264 is built from source (BSD-2-Clause), for both sending and watching streams.
+# Held at 0.9.0: later releases need a newer SIMD crate that requires Rust 1.89.
+openh264 = "=0.9.0"
 parking_lot.workspace = true
 rand.workspace = true
 serde.workspace = true

@@ -132,6 +132,31 @@ impl TransportCipher {
     }
 }
 
+impl TransportCipher {
+    /// Decrypts an RTCP packet: its first eight bytes (header and sender SSRC) are the
+    /// additional data. Returns the whole packet in the clear.
+    pub fn open_rtcp(&self, packet: &[u8]) -> Option<Vec<u8>> {
+        const HEAD: usize = 8;
+        if packet.len() < HEAD + OVERHEAD {
+            return None;
+        }
+        let (body, counter) = packet.split_at(packet.len() - 4);
+        let counter: [u8; 4] = counter.try_into().ok()?;
+        let msg = Payload {
+            msg: &body[HEAD..],
+            aad: &body[..HEAD],
+        };
+        let plain = match &self.cipher {
+            Cipher::Aes(c) => c.decrypt(&nonce12(counter).into(), msg),
+            Cipher::XChaCha(c) => c.decrypt(&nonce24(counter).into(), msg),
+        }
+        .ok()?;
+        let mut out = body[..HEAD].to_vec();
+        out.extend_from_slice(&plain);
+        Some(out)
+    }
+}
+
 fn nonce12(counter: [u8; 4]) -> [u8; 12] {
     let mut n = [0u8; 12];
     n[..4].copy_from_slice(&counter);
@@ -151,6 +176,7 @@ mod tests {
     fn header() -> RtpHeader {
         RtpHeader {
             payload_type: RtpHeader::OPUS,
+            marker: false,
             sequence: 1,
             timestamp: 960,
             ssrc: 99,
@@ -204,6 +230,17 @@ mod tests {
         c.seal(&h, &body, &mut out).unwrap();
         let (_, payload) = c.open(&out).unwrap();
         assert_eq!(payload, b"audio");
+    }
+
+    #[test]
+    fn rtcp_round_trip() {
+        let mut c = TransportCipher::new(EncryptionMode::Aes256Gcm, &[5u8; 32]).unwrap();
+        let (head, media) = crate::rtp::rtcp_pli(1, 2);
+        let mut out = Vec::new();
+        c.seal(&head, &media, &mut out).unwrap();
+        let plain = c.open_rtcp(&out).unwrap();
+        assert_eq!(&plain[..8], &head);
+        assert_eq!(&plain[8..], &media);
     }
 
     #[test]

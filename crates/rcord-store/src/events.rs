@@ -79,6 +79,14 @@ pub enum Update {
     GuildMembersChunk(Box<MembersChunk>),
     /// Where to connect for voice. Used by the call, not cached.
     VoiceServerUpdate(Box<VoiceServerUpdate>),
+    /// A Go Live stream this client started or asked to watch now exists.
+    StreamCreate(Box<StreamInfo>),
+    /// A stream's viewers or paused state changed.
+    StreamUpdate(Box<StreamInfo>),
+    /// Where to connect for a stream's media.
+    StreamServerUpdate(Box<StreamServerUpdate>),
+    /// A stream ended, or this client stopped watching it.
+    StreamDelete(Box<StreamDelete>),
     UserUpdate(Box<User>),
     RelationshipAdd(Box<Relationship>),
     RelationshipRemove {
@@ -100,6 +108,45 @@ pub struct VoiceServerUpdate {
     /// `None` while Discord moves the call to another server.
     #[serde(default)]
     pub endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamInfo {
+    pub stream_key: String,
+    /// The stream media server's ID; set on STREAM_CREATE.
+    #[serde(default, deserialize_with = "lenient_id")]
+    pub rtc_server_id: Option<u64>,
+    #[serde(default)]
+    pub viewer_ids: Vec<Snowflake>,
+    #[serde(default)]
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamServerUpdate {
+    pub stream_key: String,
+    pub token: String,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamDelete {
+    pub stream_key: String,
+    /// Why it ended, such as `"user_requested"` or `"stream_full"`.
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub unavailable: bool,
+}
+
+fn lenient_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(match v {
+        Some(serde_json::Value::String(s)) => s.parse().ok(),
+        Some(serde_json::Value::Number(n)) => n.as_u64(),
+        _ => None,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -521,6 +568,10 @@ pub fn parse(name: &str, data: &RawValue) -> serde_json::Result<Update> {
         "VOICE_STATE_UPDATE" => Update::VoiceStateUpdate(Box::new(p(d)?)),
         "GUILD_MEMBERS_CHUNK" => Update::GuildMembersChunk(Box::new(p(d)?)),
         "VOICE_SERVER_UPDATE" => Update::VoiceServerUpdate(Box::new(p(d)?)),
+        "STREAM_CREATE" => Update::StreamCreate(Box::new(p(d)?)),
+        "STREAM_UPDATE" => Update::StreamUpdate(Box::new(p(d)?)),
+        "STREAM_SERVER_UPDATE" => Update::StreamServerUpdate(Box::new(p(d)?)),
+        "STREAM_DELETE" => Update::StreamDelete(Box::new(p(d)?)),
         "USER_UPDATE" => Update::UserUpdate(Box::new(p(d)?)),
         "RELATIONSHIP_ADD" => Update::RelationshipAdd(Box::new(p(d)?)),
         "RELATIONSHIP_REMOVE" => {

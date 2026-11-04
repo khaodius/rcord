@@ -7,6 +7,7 @@ use gpui::{
 };
 use rcord_model::{Emoji, Snowflake, StickerFormat, StickerItem, cdn};
 
+use crate::golive::StreamPreset;
 use crate::state::{AppState, ExpressionTab, Overlay, StateEvent};
 use crate::theme::theme;
 use crate::ui::anim_img;
@@ -797,6 +798,194 @@ impl OverlayLayer {
             .into_any_element()
     }
 
+    /// Discord-style Go Live dialog: what to share, then the stream quality.
+    fn go_live_picker(
+        &self,
+        sources: Vec<rcord_capture::Source>,
+        selected: usize,
+        preset: StreamPreset,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = theme(cx).clone();
+        let wayland = rcord_capture::is_wayland();
+        let mut list = div().flex().flex_col().gap(px(4.));
+        for (i, src) in sources.iter().enumerate() {
+            let state = self.state.clone();
+            let all = sources.clone();
+            let on = i == selected;
+            list = list.child(
+                div()
+                    .id(("golive-source", i))
+                    .px(px(12.))
+                    .py(px(10.))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .rounded(t.radius_small)
+                    .border_1()
+                    .border_color(if on { t.accent } else { t.border })
+                    .when(on, |el| el.bg(t.selected))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(t.hover))
+                    .child(icon(Icon::Screen).size(px(22.)).text_color(if on {
+                        t.text
+                    } else {
+                        t.text_muted
+                    }))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_color(t.text)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(src.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(t.text_faint)
+                                    .child(src.detail.clone()),
+                            ),
+                    )
+                    .on_click(move |_, _, cx| {
+                        let sources = all.clone();
+                        state.update(cx, |s, cx| {
+                            s.set_overlay(
+                                Some(Overlay::GoLive {
+                                    sources,
+                                    selected: i,
+                                    preset,
+                                }),
+                                cx,
+                            )
+                        })
+                    }),
+            );
+        }
+        let mut presets = div().flex().gap(px(6.));
+        for p in StreamPreset::ALL {
+            let state = self.state.clone();
+            let all = sources.clone();
+            let on = p == preset;
+            presets = presets.child(
+                div()
+                    .id(p.label())
+                    .flex_1()
+                    .py(px(8.))
+                    .flex()
+                    .justify_center()
+                    .rounded(t.radius_small)
+                    .text_sm()
+                    .cursor_pointer()
+                    .when(on, |el| el.bg(t.accent).text_color(t.accent_text))
+                    .when(!on, |el| {
+                        el.bg(t.base)
+                            .text_color(t.text_muted)
+                            .hover(|s| s.bg(t.hover).text_color(t.text))
+                    })
+                    .child(p.label())
+                    .on_click(move |_, _, cx| {
+                        let sources = all.clone();
+                        state.update(cx, |s, cx| {
+                            s.set_overlay(
+                                Some(Overlay::GoLive {
+                                    sources,
+                                    selected,
+                                    preset: p,
+                                }),
+                                cx,
+                            )
+                        })
+                    }),
+            );
+        }
+        let source = sources.get(selected).map(|s| s.id.clone());
+        let state = self.state.clone();
+        let cancel = self.state.clone();
+        div()
+            .id("golive")
+            .occlude()
+            .w(px(480.))
+            .p(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(14.))
+            .rounded(t.radius)
+            .bg(t.floating)
+            .border_1()
+            .border_color(t.border)
+            .shadow_lg()
+            .child(
+                div()
+                    .text_size(px(20.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(t.header)
+                    .child("Screen Share"),
+            )
+            .child(section_label(
+                if wayland { "Source" } else { "Screens" },
+                &t,
+            ))
+            .child(list)
+            .when(wayland, |el| {
+                el.child(div().text_xs().text_color(t.text_faint).child(
+                    "Your desktop will ask which screen or window to share. Capture runs \
+                     natively on Wayland through the desktop portal and PipeWire.",
+                ))
+            })
+            .child(section_label("Stream quality", &t))
+            .child(presets)
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .id("golive-cancel")
+                            .px(px(16.))
+                            .py(px(8.))
+                            .rounded(t.radius_small)
+                            .cursor_pointer()
+                            .text_color(t.text)
+                            .hover(|s| s.bg(t.hover))
+                            .child("Cancel")
+                            .on_click(move |_, _, cx| {
+                                cancel.update(cx, |s, cx| s.set_overlay(None, cx))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .id("golive-start")
+                            .px(px(16.))
+                            .py(px(8.))
+                            .rounded(t.radius_small)
+                            .cursor_pointer()
+                            .bg(t.accent)
+                            .hover(|s| s.bg(t.accent_hover))
+                            .text_color(t.accent_text)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Go Live")
+                            .on_click(move |_, _, cx| {
+                                let Some(source) = source.clone() else {
+                                    return;
+                                };
+                                state.update(cx, |s, cx| {
+                                    s.set_overlay(None, cx);
+                                    s.start_go_live(source, preset, cx);
+                                })
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn toasts(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let t = theme(cx).clone();
         let toasts = self.state.read(cx).toasts.clone();
@@ -900,6 +1089,17 @@ impl Render for OverlayLayer {
                     .items_center()
                     .justify_center()
                     .child(self.switcher(cx));
+            }
+            Some(Overlay::GoLive {
+                sources,
+                selected,
+                preset,
+            }) => {
+                root = scrim_close(root.bg(t.scrim), self.state.clone())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(self.go_live_picker(sources, selected, preset, cx));
             }
         }
         let _ = Self::close;
