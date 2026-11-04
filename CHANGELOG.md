@@ -3,7 +3,7 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
-## Unreleased
+## 0.1.6 - 2026-11-04
 
 - **Voice channels show who is already in them** when rcord starts, instead of only people who
   joined afterwards. Participants rcord has no profile for yet are looked up.
