@@ -26,6 +26,7 @@ use crate::{CaptureError, Frame, PixelFormat};
 
 pub(crate) fn start(
     max_fps: u32,
+    cursor: bool,
     tx: SyncSender<Frame>,
 ) -> Result<impl FnOnce() + Send + use<>, CaptureError> {
     let (ready_tx, ready_rx) = channel::<Result<(OwnedFd, u32), CaptureError>>();
@@ -60,8 +61,13 @@ pub(crate) fn start(
                     }
                 };
                 let picked = async {
+                    let wanted = if cursor {
+                        CursorMode::Embedded
+                    } else {
+                        CursorMode::Hidden
+                    };
                     let cursor = match proxy.available_cursor_modes().await {
-                        Ok(m) if m.contains(CursorMode::Embedded) => Some(CursorMode::Embedded),
+                        Ok(m) if m.contains(wanted) => Some(wanted),
                         _ => None,
                     };
                     proxy

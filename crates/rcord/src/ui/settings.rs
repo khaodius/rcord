@@ -10,8 +10,8 @@ use gpui::{
     Subscription, Window, canvas, div, prelude::*, px,
 };
 use rcord_settings::{
-    Animate, COLOR_KEYS, Encoder, Keybinds, MessageDisplay, PanelId, RoleColors, Settings,
-    Spoilers, ThemeFile, ThemeId,
+    Animate, COLOR_KEYS, Keybinds, MessageDisplay, PanelId, RoleColors, Settings, Spoilers,
+    ThemeFile, ThemeId,
 };
 
 use crate::state::{AppState, Overlay, SettingsPage, StateEvent};
@@ -1256,10 +1256,6 @@ impl SettingsView {
         let mut out = self.voice_page(t, s, cx);
         out.extend([
             heading("Screen share", t),
-            banner(
-                "Screen share is under construction. These settings are saved now and apply once it ships.",
-                t,
-            ),
             self.choice(
                 "Resolution",
                 s,
@@ -1281,22 +1277,10 @@ impl SettingsView {
                 t,
                 cx,
             ),
-            self.choice(
-                "Encoder",
-                s,
-                |s| &mut s.stream.encoder,
-                &[
-                    ("Automatic", Encoder::Auto),
-                    ("Hardware", Encoder::Hardware),
-                    ("Software", Encoder::Software),
-                ],
-                t,
-                cx,
-            ),
-            self.toggle("Share audio", "", s, |s| &mut s.stream.include_audio, t, cx),
             self.toggle(
                 "Show cursor",
-                "",
+                "Draws your pointer into the stream on Wayland. Windows and X11 capture \
+                 leaves it out.",
                 s,
                 |s| &mut s.stream.capture_cursor,
                 t,
@@ -2085,19 +2069,6 @@ fn note(text: &str, t: &Theme) -> AnyElement {
     div()
         .text_sm()
         .text_color(t.text_muted)
-        .child(text.to_owned())
-        .into_any_element()
-}
-
-fn banner(text: &str, t: &Theme) -> AnyElement {
-    div()
-        .p(px(12.))
-        .rounded(t.radius_small)
-        .border_1()
-        .border_color(t.accent)
-        .bg(Hsla { a: 0.1, ..t.accent })
-        .text_sm()
-        .text_color(t.text)
         .child(text.to_owned())
         .into_any_element()
 }

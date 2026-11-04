@@ -538,7 +538,7 @@ impl ChannelSidebar {
         let live = s.go_live.as_ref().map(|l| {
             let viewers = l.viewers.len();
             let status = match l.status {
-                crate::golive::StreamStatus::Live => l.preset.label().to_owned(),
+                crate::golive::StreamStatus::Live => l.preset.label(),
                 crate::golive::StreamStatus::Reconnecting => "Reconnecting".to_owned(),
                 _ => "Starting".to_owned(),
             };

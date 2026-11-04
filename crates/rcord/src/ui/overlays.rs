@@ -898,43 +898,79 @@ impl OverlayLayer {
                     }),
             );
         }
-        let mut presets = div().flex().gap(px(6.));
-        for p in StreamPreset::ALL {
-            let state = self.state.clone();
-            let all = sources.clone();
-            let on = p == preset;
-            presets = presets.child(
-                div()
-                    .id(p.label())
-                    .flex_1()
-                    .py(px(8.))
-                    .flex()
-                    .justify_center()
-                    .rounded(t.radius_small)
-                    .text_sm()
-                    .cursor_pointer()
-                    .when(on, |el| el.bg(t.accent).text_color(t.accent_text))
-                    .when(!on, |el| {
-                        el.bg(t.base)
-                            .text_color(t.text_muted)
-                            .hover(|s| s.bg(t.hover).text_color(t.text))
-                    })
-                    .child(p.label())
-                    .on_click(move |_, _, cx| {
-                        let sources = all.clone();
-                        state.update(cx, |s, cx| {
-                            s.set_overlay(
-                                Some(Overlay::GoLive {
-                                    sources,
-                                    selected,
-                                    preset: p,
-                                }),
-                                cx,
-                            )
-                        })
-                    }),
-            );
-        }
+        let option_row =
+            |id: &'static str, options: Vec<(String, StreamPreset)>, t: &crate::theme::Theme| {
+                let mut row = div().flex().gap(px(6.));
+                for (i, (label, p)) in options.into_iter().enumerate() {
+                    let state = self.state.clone();
+                    let all = sources.clone();
+                    let on = p == preset;
+                    row = row.child(
+                        div()
+                            .id((id, i))
+                            .flex_1()
+                            .py(px(8.))
+                            .flex()
+                            .justify_center()
+                            .rounded(t.radius_small)
+                            .text_sm()
+                            .cursor_pointer()
+                            .when(on, |el| el.bg(t.accent).text_color(t.accent_text))
+                            .when(!on, |el| {
+                                el.bg(t.base)
+                                    .text_color(t.text_muted)
+                                    .hover(|s| s.bg(t.hover).text_color(t.text))
+                            })
+                            .child(label)
+                            .on_click(move |_, _, cx| {
+                                let sources = all.clone();
+                                state.update(cx, |s, cx| {
+                                    s.set_overlay(
+                                        Some(Overlay::GoLive {
+                                            sources,
+                                            selected,
+                                            preset: p,
+                                        }),
+                                        cx,
+                                    )
+                                })
+                            }),
+                    );
+                }
+                row
+            };
+        let resolutions = option_row(
+            "golive-res",
+            StreamPreset::RESOLUTIONS
+                .iter()
+                .map(|(label, height)| {
+                    (
+                        (*label).to_owned(),
+                        StreamPreset {
+                            height: *height,
+                            ..preset
+                        },
+                    )
+                })
+                .collect(),
+            &t,
+        );
+        let frame_rates = option_row(
+            "golive-fps",
+            StreamPreset::FRAME_RATES
+                .iter()
+                .map(|fps| {
+                    (
+                        format!("{fps} FPS"),
+                        StreamPreset {
+                            fps: *fps,
+                            ..preset
+                        },
+                    )
+                })
+                .collect(),
+            &t,
+        );
         let source = sources.get(selected).map(|s| s.id.clone());
         let state = self.state.clone();
         let cancel = self.state.clone();
@@ -969,8 +1005,10 @@ impl OverlayLayer {
                      natively on Wayland through the desktop portal and PipeWire.",
                 ))
             })
-            .child(section_label("Stream quality", &t))
-            .child(presets)
+            .child(section_label("Resolution", &t))
+            .child(resolutions)
+            .child(section_label("Frame rate", &t))
+            .child(frame_rates)
             .child(
                 div()
                     .flex()
