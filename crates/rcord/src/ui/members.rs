@@ -26,7 +26,7 @@ impl MemberList {
             let guild = state.read(cx).guild;
             match event {
                 StateEvent::Store(Change::Members(g)) if Some(*g) == guild => this.sync(cx),
-                StateEvent::Store(Change::Presence(_)) if guild.is_none() => cx.notify(),
+                StateEvent::Store(Change::Presence(_)) => cx.notify(),
                 StateEvent::Store(Change::Everything)
                 | StateEvent::Selection
                 | StateEvent::Settings => this.sync(cx),

@@ -15,6 +15,7 @@ use rcord_settings::{
 };
 
 use crate::state::{AppState, Overlay, SettingsPage, StateEvent};
+use rcord_store::Change;
 use crate::theme::{Theme, theme};
 use crate::ui::icons::{Icon, icon};
 use crate::ui::profile::profile_card;
@@ -123,11 +124,23 @@ impl SettingsView {
             }
             i
         });
-        let mut subs = vec![cx.subscribe(&state, |_, _, e, cx| {
-            if matches!(
-                e,
-                StateEvent::Settings | StateEvent::Overlay | StateEvent::Store(_)
-            ) {
+        // Messages, typing and presences change many times a second in busy servers and
+        // nothing in Settings shows them, so only the changes Settings draws redraw it.
+        let mut subs = vec![cx.subscribe(&state, |_, state, e, cx| {
+            let open = matches!(state.read(cx).overlay, Some(Overlay::Settings(_)));
+            let relevant = match e {
+                StateEvent::Settings | StateEvent::Overlay => true,
+                StateEvent::Store(change) => matches!(
+                    change,
+                    Change::Everything
+                        | Change::Me
+                        | Change::Guilds
+                        | Change::Relationships
+                        | Change::Voice(_)
+                ),
+                _ => false,
+            };
+            if relevant && (open || matches!(e, StateEvent::Overlay)) {
                 cx.notify();
             }
         })];
