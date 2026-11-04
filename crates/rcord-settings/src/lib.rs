@@ -317,6 +317,19 @@ pub enum InputMode {
     PushToTalk,
 }
 
+/// A preset for the microphone, as Discord offers them. Only `Custom` uses the individual
+/// processing settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InputProfile {
+    /// Strong noise suppression, automatic gain and automatic sensitivity.
+    #[default]
+    VoiceIsolation,
+    /// No processing: the microphone as it is, transmitted whenever it picks anything up.
+    Studio,
+    Custom,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NoiseSuppression {
@@ -335,6 +348,7 @@ pub struct Voice {
     pub input_volume: f32,
     pub output_volume: f32,
     pub input_mode: InputMode,
+    pub input_profile: InputProfile,
     /// Detect the speaking threshold automatically.
     pub auto_sensitivity: bool,
     /// Manual threshold in dBFS, -100 to 0.
@@ -358,6 +372,7 @@ impl Default for Voice {
             input_volume: 1.0,
             output_volume: 1.0,
             input_mode: InputMode::VoiceActivity,
+            input_profile: InputProfile::VoiceIsolation,
             auto_sensitivity: true,
             sensitivity_db: -50.0,
             push_to_talk_key: None,

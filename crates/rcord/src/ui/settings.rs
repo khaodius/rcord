@@ -10,8 +10,8 @@ use gpui::{
     Subscription, Window, canvas, div, prelude::*, px,
 };
 use rcord_settings::{
-    Animate, COLOR_KEYS, Encoder, InputMode, Keybinds, MessageDisplay, NoiseSuppression, PanelId,
-    RoleColors, Settings, Spoilers, ThemeFile, ThemeId,
+    Animate, COLOR_KEYS, Encoder, Keybinds, MessageDisplay, PanelId, RoleColors, Settings,
+    Spoilers, ThemeFile, ThemeId,
 };
 
 use crate::state::{AppState, Overlay, SettingsPage, StateEvent};
@@ -20,6 +20,8 @@ use crate::ui::icons::{Icon, icon};
 use crate::ui::profile::profile_card;
 use crate::ui::text_input::{InputEvent, TextInput};
 use crate::ui::{avatar, section_label, user_avatar_url};
+
+mod voice;
 
 type Field<T> = fn(&mut Settings) -> &mut T;
 
@@ -92,6 +94,7 @@ pub struct SettingsView {
     installed_themes: Rc<Vec<(std::path::PathBuf, ThemeFile)>>,
     recording: Option<String>,
     revealed_email: bool,
+    voice_page: voice::VoicePage,
     _subs: Vec<Subscription>,
 }
 
@@ -255,6 +258,7 @@ impl SettingsView {
             build_input,
             recording: None,
             revealed_email: false,
+            voice_page: voice::VoicePage::default(),
             _subs: subs,
         }
     }
@@ -1180,155 +1184,13 @@ impl SettingsView {
     }
 
     fn voice(&mut self, t: &Theme, s: &mut Settings, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let ptt = s.voice.input_mode == InputMode::PushToTalk;
-        let auto = s.voice.auto_sensitivity;
-        let mut out = vec![
-            banner(
-                "Voice and screen share are under construction. These settings are saved now and apply once calls ship.",
-                t,
-            ),
-            heading("Devices", t),
-            labeled(
-                "Input device",
-                "",
-                value_chip(
-                    s.voice.input_device.as_deref().unwrap_or("System default"),
-                    t,
-                ),
-                t,
-            ),
-            labeled(
-                "Output device",
-                "",
-                value_chip(
-                    s.voice.output_device.as_deref().unwrap_or("System default"),
-                    t,
-                ),
-                t,
-            ),
-            self.slider(
-                "Input volume",
-                s,
-                |s| &mut s.voice.input_volume,
-                0.,
-                2.,
-                0.05,
-                |v| format!("{:.0}%", v * 100.),
-                t,
-                cx,
-            ),
-            self.slider(
-                "Output volume",
-                s,
-                |s| &mut s.voice.output_volume,
-                0.,
-                2.,
-                0.05,
-                |v| format!("{:.0}%", v * 100.),
-                t,
-                cx,
-            ),
-            heading("Input mode", t),
-            self.choice(
-                "Mode",
-                s,
-                |s| &mut s.voice.input_mode,
-                &[
-                    ("Voice activity", InputMode::VoiceActivity),
-                    ("Push to talk", InputMode::PushToTalk),
-                ],
-                t,
-                cx,
-            ),
-        ];
-        if ptt {
-            out.push(self.slider_u32(
-                "Release delay",
-                s,
-                |s| &mut s.voice.push_to_talk_release_ms,
-                0,
-                2000,
-                10,
-                |v| format!("{v} ms"),
-                t,
-                cx,
-            ));
-        } else {
-            out.push(self.toggle(
-                "Automatic sensitivity",
-                "",
-                s,
-                |s| &mut s.voice.auto_sensitivity,
-                t,
-                cx,
-            ));
-            if !auto {
-                out.push(self.slider(
-                    "Sensitivity",
-                    s,
-                    |s| &mut s.voice.sensitivity_db,
-                    -100.,
-                    0.,
-                    1.,
-                    |v| format!("{v:.0} dB"),
-                    t,
-                    cx,
-                ));
-            }
-        }
+        let mut out = self.voice_page(t, s, cx);
         out.extend([
-            heading("Processing", t),
-            self.choice(
-                "Noise suppression",
-                s,
-                |s| &mut s.voice.noise_suppression,
-                &[
-                    ("Off", NoiseSuppression::Off),
-                    ("Standard", NoiseSuppression::Standard),
-                    ("Strong", NoiseSuppression::Strong),
-                ],
-                t,
-                cx,
-            ),
-            self.toggle(
-                "Echo cancellation",
-                "",
-                s,
-                |s| &mut s.voice.echo_cancellation,
-                t,
-                cx,
-            ),
-            self.toggle(
-                "Automatic gain control",
-                "",
-                s,
-                |s| &mut s.voice.automatic_gain,
-                t,
-                cx,
-            ),
-            self.slider(
-                "Attenuation",
-                s,
-                |s| &mut s.voice.attenuation,
-                0.,
-                1.,
-                0.05,
-                |v| format!("{:.0}%", v * 100.),
-                t,
-                cx,
-            ),
-            self.slider_u32(
-                "Maximum bitrate",
-                s,
-                |s| &mut s.voice.max_bitrate_kbps,
-                8,
-                512,
-                8,
-                |v| format!("{v} kbps"),
-                t,
-                cx,
-            ),
             heading("Screen share", t),
+            banner(
+                "Screen share is under construction. These settings are saved now and apply once it ships.",
+                t,
+            ),
             self.choice(
                 "Resolution",
                 s,
@@ -2208,20 +2070,6 @@ fn row(title: &str, desc: &str, t: &Theme) -> gpui::Div {
 fn labeled(title: &str, desc: &str, control: AnyElement, t: &Theme) -> AnyElement {
     row(title, desc, t)
         .child(div().w(px(240.)).child(control))
-        .into_any_element()
-}
-
-fn value_chip(text: &str, t: &Theme) -> AnyElement {
-    div()
-        .h(px(36.))
-        .px(px(12.))
-        .rounded(t.radius_small)
-        .bg(t.input)
-        .flex()
-        .items_center()
-        .text_sm()
-        .text_color(t.text)
-        .child(text.to_owned())
         .into_any_element()
 }
 

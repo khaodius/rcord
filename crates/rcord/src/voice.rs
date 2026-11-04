@@ -9,9 +9,9 @@ use std::time::Duration;
 use gpui::{Context, Task};
 use rcord_gateway::{Command, VoiceStateUpdate};
 use rcord_model::Snowflake;
-use rcord_settings::{InputMode, NoiseSuppression, Settings};
+use rcord_settings::{InputMode, InputProfile, NoiseSuppression, Settings};
 use rcord_store::{Change, Update};
-use rcord_voice::{AudioSettings, ConnectionState, Transmit, VoiceConfig, VoiceEvent};
+use rcord_voice::{AudioSettings, ConnectionState, Denoise, Transmit, VoiceConfig, VoiceEvent};
 
 use crate::net::Net;
 use crate::state::{AppState, StateEvent};
@@ -72,15 +72,34 @@ pub fn audio_settings(settings: &Settings, channel_bitrate: Option<u32>) -> Audi
         output_device: v.output_device.clone(),
         input_gain: v.input_volume,
         output_gain: v.output_volume,
-        transmit: match v.input_mode {
-            InputMode::PushToTalk => Transmit::PushToTalk {
+        transmit: match (v.input_mode, v.input_profile) {
+            (InputMode::PushToTalk, _) => Transmit::PushToTalk {
                 release_ms: v.push_to_talk_release_ms,
             },
-            InputMode::VoiceActivity => Transmit::VoiceActivity {
+            // An open mic, closed only by digital silence.
+            (InputMode::VoiceActivity, InputProfile::Studio) => Transmit::VoiceActivity {
+                threshold_db: Some(-90.0),
+            },
+            (InputMode::VoiceActivity, InputProfile::VoiceIsolation) => {
+                Transmit::VoiceActivity { threshold_db: None }
+            }
+            (InputMode::VoiceActivity, InputProfile::Custom) => Transmit::VoiceActivity {
                 threshold_db: (!v.auto_sensitivity).then_some(v.sensitivity_db),
             },
         },
-        noise_suppression: v.noise_suppression != NoiseSuppression::Off,
+        noise_suppression: match (v.input_profile, v.noise_suppression) {
+            (InputProfile::VoiceIsolation, _) => Denoise::Strong,
+            (InputProfile::Studio, _) | (InputProfile::Custom, NoiseSuppression::Off) => {
+                Denoise::Off
+            }
+            (InputProfile::Custom, NoiseSuppression::Standard) => Denoise::Standard,
+            (InputProfile::Custom, NoiseSuppression::Strong) => Denoise::Strong,
+        },
+        automatic_gain: match v.input_profile {
+            InputProfile::VoiceIsolation => true,
+            InputProfile::Studio => false,
+            InputProfile::Custom => v.automatic_gain,
+        },
         bitrate_kbps: channel_bitrate.map_or(cap, |b| (b / 1000).clamp(8, cap)),
     }
 }
@@ -115,6 +134,7 @@ impl AppState {
             .or_else(|| self.store.my_voice_state().map(|v| v.guild_id))
             .flatten();
         self.call = None;
+        self.forget_my_voice_state(guild);
         if let Some(gw) = &self.gateway {
             gw.send(Command::UpdateVoiceState(VoiceStateUpdate {
                 guild_id: guild,
@@ -146,6 +166,63 @@ impl AppState {
         }
         cx.emit(StateEvent::Store(Change::Me));
         cx.notify();
+    }
+
+    /// Takes this account out of the channel list at once. Discord confirms with its own
+    /// voice state update, but the list should not wait on it, or keep showing us if it is
+    /// lost.
+    fn forget_my_voice_state(&mut self, guild: Option<Snowflake>) {
+        let Some(me) = self.store.me_id() else {
+            return;
+        };
+        let left = rcord_model::VoiceState {
+            guild_id: guild,
+            channel_id: None,
+            user_id: me,
+            session_id: String::new(),
+            member: None,
+            deaf: false,
+            mute: false,
+            self_deaf: false,
+            self_mute: false,
+            self_stream: false,
+            self_video: false,
+            suppress: false,
+        };
+        self.store.apply(
+            Update::VoiceStateUpdate(Box::new(left)),
+            crate::state::now_ms(),
+        );
+    }
+
+    /// Asks the gateway for voice participants whose profiles are not cached, so the
+    /// channel list can show their names and avatars.
+    pub(crate) fn request_voice_members(&mut self) {
+        let Some(gw) = &self.gateway else {
+            return;
+        };
+        let mut wanted: std::collections::BTreeMap<Snowflake, Vec<Snowflake>> = Default::default();
+        for v in self.store.voice_states() {
+            if let Some(g) = v.guild_id
+                && self.store.user(v.user_id).is_none()
+                && self.voice_members_requested.insert(v.user_id)
+            {
+                wanted.entry(g).or_default().push(v.user_id);
+            }
+        }
+        for (guild, users) in wanted {
+            for chunk in users.chunks(100) {
+                gw.send(Command::RequestGuildMembers(
+                    rcord_gateway::RequestGuildMembers {
+                        guild_id: vec![guild],
+                        query: None,
+                        user_ids: Some(chunk.to_vec()),
+                        limit: 0,
+                        presences: false,
+                    },
+                ));
+            }
+        }
     }
 
     /// Passes changed voice settings to a running call.
@@ -325,6 +402,7 @@ impl AppState {
                 tracing::info!("voice closed ({code:?}): {reason}");
                 let guild = call.guild;
                 self.call = None;
+                self.forget_my_voice_state(guild);
                 if reason != "Disconnected" {
                     self.toast(reason, cx);
                 }
@@ -353,6 +431,7 @@ mod tests {
     fn audio_settings_follow_the_channel_bitrate() {
         let mut s = Settings::default();
         s.voice.max_bitrate_kbps = 96;
+        s.voice.input_profile = InputProfile::Custom;
         assert_eq!(audio_settings(&s, Some(64_000)).bitrate_kbps, 64);
         assert_eq!(audio_settings(&s, Some(384_000)).bitrate_kbps, 96);
         assert_eq!(audio_settings(&s, None).bitrate_kbps, 96);
@@ -365,6 +444,14 @@ mod tests {
             }
         );
         s.voice.noise_suppression = NoiseSuppression::Off;
-        assert!(!audio_settings(&s, None).noise_suppression);
+        assert_eq!(audio_settings(&s, None).noise_suppression, Denoise::Off);
+        s.voice.input_profile = InputProfile::VoiceIsolation;
+        let iso = audio_settings(&s, None);
+        assert_eq!(iso.noise_suppression, Denoise::Strong);
+        assert!(iso.automatic_gain);
+        s.voice.input_profile = InputProfile::Studio;
+        let studio = audio_settings(&s, None);
+        assert_eq!(studio.noise_suppression, Denoise::Off);
+        assert!(!studio.automatic_gain);
     }
 }

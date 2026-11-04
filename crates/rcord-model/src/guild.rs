@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Channel, Emoji, Permissions, Snowflake, Sticker, User};
+use crate::{Channel, Emoji, Permissions, Snowflake, Sticker, User, VoiceState};
 
 /// A server. READY sends some fields under `properties` when the client asks for the
 /// newer client state; [`Guild::from_gateway`] accepts both shapes.
@@ -39,6 +39,10 @@ pub struct Guild {
     pub threads: Vec<Channel>,
     #[serde(default)]
     pub unavailable: bool,
+    /// Who is in the guild's voice channels when it arrives. Moved into the cache's voice
+    /// table on insert.
+    #[serde(default, skip_serializing)]
+    pub voice_states: Vec<VoiceState>,
 }
 
 impl Guild {

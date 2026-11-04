@@ -223,6 +223,11 @@ impl Store {
             .filter(move |v| v.channel_id == Some(channel))
     }
 
+    /// Everyone in a voice channel that this client knows of.
+    pub fn voice_states(&self) -> impl Iterator<Item = &VoiceState> {
+        self.voice.values()
+    }
+
     pub fn voice_state(&self, user: Snowflake) -> Option<&VoiceState> {
         self.voice.get(&user)
     }
@@ -356,7 +361,18 @@ impl Store {
         self.read_states.get(&channel).copied().unwrap_or_default()
     }
 
+    /// Whether `channel` counts toward unread markers and mention badges. Voice channels do
+    /// not: their text chat cannot be opened here, so a marker could never be cleared.
+    pub fn tracks_unread(&self, channel: Snowflake) -> bool {
+        self.channels
+            .get(&channel)
+            .is_some_and(|c| !c.kind.is_voice())
+    }
+
     pub fn is_unread(&self, channel: Snowflake) -> bool {
+        if !self.tracks_unread(channel) {
+            return false;
+        }
         let Some(last) = self.channels.get(&channel).and_then(|c| c.last_message_id) else {
             return false;
         };
@@ -374,6 +390,9 @@ impl Store {
         let mut unread = false;
         let mut mentions = 0;
         for id in &entry.channel_ids {
+            if !self.tracks_unread(*id) {
+                continue;
+            }
             mentions += self.read_state(*id).mentions;
             if !unread && self.is_unread(*id) && self.can_view(*id) {
                 unread = true;
@@ -529,6 +548,7 @@ impl Store {
 
     fn insert_guild(&mut self, mut guild: Guild) {
         let id = guild.id;
+        let voice = std::mem::take(&mut guild.voice_states);
         let channels = std::mem::take(&mut guild.channels);
         let threads = std::mem::take(&mut guild.threads);
         let members = self
@@ -550,6 +570,14 @@ impl Store {
         for c in channels.into_iter().chain(threads) {
             self.insert_channel(c, Some(id));
         }
+        if !voice.is_empty() {
+            self.voice
+                .retain(|_, v| v.guild_id != Some(id) || v.channel_id.is_none());
+            for mut v in voice {
+                v.guild_id.get_or_insert(id);
+                self.insert_voice_state(v);
+            }
+        }
     }
 
     fn insert_member(&mut self, guild: Snowflake, mut member: Member) -> Option<Snowflake> {
@@ -568,7 +596,13 @@ impl Store {
         Some(id)
     }
 
-    fn insert_voice_state(&mut self, state: VoiceState) {
+    fn insert_voice_state(&mut self, mut state: VoiceState) {
+        if let (Some(guild), Some(mut member)) = (state.guild_id, state.member.take()) {
+            if member.user.is_none() {
+                member.user_id.get_or_insert(state.user_id);
+            }
+            self.insert_member(guild, member);
+        }
         if state.channel_id.is_some() {
             self.voice.insert(state.user_id, state);
         } else {
@@ -796,6 +830,11 @@ impl Store {
                 for list in sup.merged_presences.guilds {
                     for p in list {
                         self.insert_presence(p);
+                    }
+                }
+                for (g, members) in sup.guilds.iter().zip(sup.merged_members) {
+                    for m in members {
+                        self.insert_member(g.id, m);
                     }
                 }
                 for g in sup.guilds {
@@ -1061,6 +1100,13 @@ impl Store {
                 list.retain(|(u, exp)| *u != t.user_id && *exp > now_ms);
                 list.push((t.user_id, until));
                 Change::Typing(t.channel_id)
+            }
+            Update::GuildMembersChunk(chunk) => {
+                let chunk = *chunk;
+                for m in chunk.members {
+                    self.insert_member(chunk.guild_id, m);
+                }
+                Change::Voice(Some(chunk.guild_id))
             }
             Update::VoiceStateUpdate(state) => {
                 let guild = state.guild_id;

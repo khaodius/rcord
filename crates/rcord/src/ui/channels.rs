@@ -68,7 +68,11 @@ impl ChannelSidebar {
         let c = s.store.channel(id)?;
         let selected = s.channel == Some(id);
         let unread = s.store.is_unread(id);
-        let mentions = s.store.read_state(id).mentions;
+        let mentions = if s.store.tracks_unread(id) {
+            s.store.read_state(id).mentions
+        } else {
+            0
+        };
         let private = c.permission_overwrites.iter().any(|o| {
             Some(o.id) == c.guild_id && o.deny.contains(rcord_model::Permissions::VIEW_CHANNEL)
         });

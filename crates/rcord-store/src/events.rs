@@ -75,6 +75,8 @@ pub enum Update {
     PresenceUpdate(Box<Presence>),
     TypingStart(TypingStart),
     VoiceStateUpdate(Box<VoiceState>),
+    /// Members asked for by user ID, such as voice participants not cached yet.
+    GuildMembersChunk(Box<MembersChunk>),
     /// Where to connect for voice. Used by the call, not cached.
     VoiceServerUpdate(Box<VoiceServerUpdate>),
     UserUpdate(Box<User>),
@@ -206,8 +208,11 @@ fn loose_snowflake<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Snow
 pub struct ReadySupplemental {
     #[serde(default)]
     pub merged_presences: MergedPresences,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_vec")]
     pub guilds: Vec<SupplementalGuild>,
+    /// Members for the users in `guilds`' voice states, one list per guild in that order.
+    #[serde(default, deserialize_with = "lenient_nested")]
+    pub merged_members: Vec<Vec<Member>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -221,8 +226,15 @@ pub struct MergedPresences {
 #[derive(Debug, Deserialize)]
 pub struct SupplementalGuild {
     pub id: Snowflake,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_vec")]
     pub voice_states: Vec<VoiceState>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MembersChunk {
+    pub guild_id: Snowflake,
+    #[serde(default, deserialize_with = "lenient_vec")]
+    pub members: Vec<Member>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -507,6 +519,7 @@ pub fn parse(name: &str, data: &RawValue) -> serde_json::Result<Update> {
         "PRESENCE_UPDATE" => Update::PresenceUpdate(Box::new(p(d)?)),
         "TYPING_START" => Update::TypingStart(p(d)?),
         "VOICE_STATE_UPDATE" => Update::VoiceStateUpdate(Box::new(p(d)?)),
+        "GUILD_MEMBERS_CHUNK" => Update::GuildMembersChunk(Box::new(p(d)?)),
         "VOICE_SERVER_UPDATE" => Update::VoiceServerUpdate(Box::new(p(d)?)),
         "USER_UPDATE" => Update::UserUpdate(Box::new(p(d)?)),
         "RELATIONSHIP_ADD" => Update::RelationshipAdd(Box::new(p(d)?)),
