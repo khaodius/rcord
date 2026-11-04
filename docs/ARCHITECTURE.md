@@ -55,8 +55,8 @@ through channels and are applied between frames.
   keychain and read back at start.
 - **rcord-settings** holds every setting with defaults and clamps. Unknown or missing keys
   never fail a load, so a settings file from another version still opens; saves are atomic.
-- **rcord-voice** has the voice gateway protocol (v8, including the DAVE opcodes), encryption
-  mode selection, IP discovery and RTP headers. It is not wired to audio yet.
+- **rcord-voice** carries calls: the voice gateway (v8), DAVE end-to-end encryption, UDP media
+  with transport encryption, and the audio path between the devices and Opus. See below.
 - **rcord** is the application.
 
 ## The application
@@ -84,20 +84,69 @@ the unread markers in the sidebar, and nothing else.
   global, refreshes the window and schedules a save 400 ms later, so dragging a slider writes
   the file once.
 
-## Voice, video and screen share
+## Voice
 
-Calls are the largest piece still to build. The plan, in order:
+Joining a voice channel sends a voice state update on the main gateway. Discord answers with
+two dispatches: our own `VOICE_STATE_UPDATE`, which carries the voice session ID, and
+`VOICE_SERVER_UPDATE`, with the media server's endpoint and a token. `AppState` holds the call
+until both have arrived, then `rcord_voice::connect` starts it on the network runtime.
 
-1. Voice gateway session and UDP transport with `aead_aes256_gcm_rtpsize`, Opus encode and
-   decode, a jitter buffer per speaker, and audio devices through `cpal`.
-2. DAVE end-to-end encryption (MLS group state, per-sender frame keys), which Discord requires
-   for calls.
-3. Voice processing: voice activity detection, push to talk, noise suppression and echo
-   cancellation, honoring the settings that already exist.
-4. Video receive (H.264, VP8, AV1) decoded into GPUI textures, then camera and screen capture
-   (PipeWire portals on Linux, Windows Graphics Capture on Windows) with hardware encoders
-   where available.
+```
+ main thread            network runtime (Tokio)                  rcord-audio thread
+ ───────────            ───────────────────────                  ──────────────────
+ AppState.call ◀─events─ voice gateway (WebSocket, JSON+binary)
+                        │ Hello → Identify → Ready
+                        │ UDP IP discovery → Select Protocol
+                        │ Session Description: key, DAVE version
+                        │ DAVE MLS: external sender, key package,
+                        │ proposals, commit/welcome, transitions
+                        ▼
+                        UDP socket ── RTP ──▶ open (AEAD) ──▶ DAVE decrypt ──▶ jitter buffer per SSRC
+                                                                              Opus decode / FEC / PLC
+                                                                              mix, gain, limiter
+                                                                              resample ──▶ speakers
+                        UDP socket ◀── seal (AEAD) ◀── DAVE encrypt ◀── Opus encode (20 ms, FEC)
+                                                                              voice activity / PTT
+                                                                              RNNoise, gain
+                                                                     microphone ──▶ resample to 48 kHz
+```
 
-Until step 1 works end to end, selecting a voice channel only explains that calls are not
-available; rcord never sends a voice state update that would put the account in a channel it
-cannot hear.
+- **Voice gateway.** Heartbeats acknowledge the last sequence number (`seq_ack`), as v8
+  requires. A dropped socket resumes with that sequence and keeps the UDP socket, the keys and
+  the MLS group, so a blip does not interrupt audio. Close codes that end the session (kicked,
+  moved, call ended, session expired) end the call with a readable reason, and rcord sends a
+  voice state update that leaves the channel, so it never sits in a channel it cannot hear.
+- **Transport encryption.** `aead_aes256_gcm_rtpsize` is preferred, then
+  `aead_xchacha20_poly1305_rtpsize`. The RTP header (and an extension's four-byte header) is the
+  additional authenticated data; a 32-bit counter appended to each packet is the nonce. RTCP on
+  the same socket is ignored.
+- **DAVE.** The MLS group is managed with `davey`. rcord offers protocol version 1, sends its key
+  package when the session starts, commits proposals for members the voice server announced
+  (and only those), joins from welcomes, acknowledges every prepared transition, and switches
+  keys when the server executes it. A commit or welcome that fails is reported and rcord rejoins
+  with a fresh key package. Each Opus frame is encrypted with the sender's ratcheted key before
+  transport encryption; Opus silence frames pass through as the protocol specifies. The
+  privacy code is shown in the voice bar's tooltip.
+- **Audio.** Device callbacks only move samples into and out of two queues. The `rcord-audio`
+  thread does everything else every 5 ms. The microphone is downmixed to mono, resampled to
+  48 kHz with a cubic resampler when the device runs at another rate, scaled by the input
+  volume and cleaned by RNNoise. The gate transmits on voice activity (RNNoise's voice
+  probability and a threshold that tracks the noise floor, or the fixed threshold from
+  Settings) or push to talk, with a hangover so words are not clipped. Frames are encoded as
+  20 ms Opus at the channel's bitrate (capped by Settings) with in-band FEC, and five silence
+  frames follow the end of speech. Playback produces a frame whenever the device queue drops
+  under 60 ms, so it follows the device's clock. Each speaker has a jitter buffer (three frames
+  deep, bounded at 25) and a decoder; a missing frame is rebuilt from the next packet's FEC or
+  concealed. Mixed audio passes a soft limiter rather than clipping.
+- **Devices** are opened at 48 kHz when they support it. On Linux the PulseAudio backend (also
+  served by PipeWire) is used when available, with ALSA as the fallback. A lost device is
+  reopened every two seconds until it comes back; changing the device in Settings reopens it.
+
+### Still to build
+
+1. Push to talk with a global key, echo cancellation, per-user volume in the participant menu.
+2. Go Live: `STREAM_CREATE`/`STREAM_WATCH` on the main gateway, a second voice connection to
+   the stream server with video SSRCs, H.264 RTP packetization, then capture (PipeWire portal
+   on Wayland, XComposite or the portal on X11, Windows Graphics Capture) with hardware encoders
+   where available, and decoding into GPUI textures for watching.
+3. Camera video on the same path.

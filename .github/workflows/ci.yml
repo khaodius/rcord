@@ -35,7 +35,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev \
-            libwebkit2gtk-4.1-dev
+            libwebkit2gtk-4.1-dev libasound2-dev
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -64,7 +64,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev \
-            libwebkit2gtk-4.1-dev
+            libwebkit2gtk-4.1-dev libasound2-dev
 
       - name: Read rust-version from Cargo.toml
         id: msrv
@@ -99,7 +99,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev \
-            libwebkit2gtk-4.1-dev
+            libwebkit2gtk-4.1-dev libasound2-dev
 
       - uses: dtolnay/rust-toolchain@stable
 

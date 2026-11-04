@@ -75,6 +75,8 @@ pub enum Update {
     PresenceUpdate(Box<Presence>),
     TypingStart(TypingStart),
     VoiceStateUpdate(Box<VoiceState>),
+    /// Where to connect for voice. Used by the call, not cached.
+    VoiceServerUpdate(Box<VoiceServerUpdate>),
     UserUpdate(Box<User>),
     RelationshipAdd(Box<Relationship>),
     RelationshipRemove {
@@ -82,6 +84,20 @@ pub enum Update {
     },
     /// An event rcord does not use yet.
     Ignored,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VoiceServerUpdate {
+    pub token: String,
+    /// Set for guild calls.
+    #[serde(default)]
+    pub guild_id: Option<Snowflake>,
+    /// Set instead of the guild for direct calls.
+    #[serde(default)]
+    pub channel_id: Option<Snowflake>,
+    /// `None` while Discord moves the call to another server.
+    #[serde(default)]
+    pub endpoint: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -491,6 +507,7 @@ pub fn parse(name: &str, data: &RawValue) -> serde_json::Result<Update> {
         "PRESENCE_UPDATE" => Update::PresenceUpdate(Box::new(p(d)?)),
         "TYPING_START" => Update::TypingStart(p(d)?),
         "VOICE_STATE_UPDATE" => Update::VoiceStateUpdate(Box::new(p(d)?)),
+        "VOICE_SERVER_UPDATE" => Update::VoiceServerUpdate(Box::new(p(d)?)),
         "USER_UPDATE" => Update::UserUpdate(Box::new(p(d)?)),
         "RELATIONSHIP_ADD" => Update::RelationshipAdd(Box::new(p(d)?)),
         "RELATIONSHIP_REMOVE" => {

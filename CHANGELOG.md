@@ -3,6 +3,15 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
+## Unreleased
+
+- **Voice channels and calls**: join a voice channel and talk. Audio is Opus at the channel's
+  bitrate with forward error correction, end-to-end encrypted with Discord's DAVE protocol (the
+  voice bar shows the lock and, on hover, the call's privacy code and ping). Noise suppression,
+  voice activity that adapts to the room or uses your fixed threshold, input and output volume
+  and the devices chosen in Settings > Voice all apply live. People speaking get a green ring in
+  the channel list. A dropped voice connection resumes without leaving the call.
+
 ## 0.1.2 - 2026-11-04
 
 - **Sign-in fixed**: after a successful sign-in rcord failed with "duplicate field

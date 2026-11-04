@@ -96,6 +96,12 @@ impl ChannelSidebar {
         } else {
             Vec::new()
         };
+        let talking: Vec<Snowflake> = s
+            .call
+            .as_ref()
+            .filter(|call| call.channel == id)
+            .map(|call| call.speaking.iter().copied().collect())
+            .unwrap_or_default();
         let state = self.state.clone();
         let menu_state = self.state.clone();
         let row = div()
@@ -178,6 +184,7 @@ impl ChannelSidebar {
                 });
         for (user, name, url, muted, deafened) in voice {
             let state = self.state.clone();
+            let speaking = talking.contains(&user);
             wrapper = wrapper.child(
                 div()
                     .id(snowflake_id("voice-user", user))
@@ -192,8 +199,28 @@ impl ChannelSidebar {
                     .cursor_pointer()
                     .hover(|s| s.bg(t.hover))
                     .text_color(t.text_muted)
-                    .child(avatar(url, px(24.), None))
-                    .child(div().flex_1().min_w_0().truncate().text_sm().child(name))
+                    .child(
+                        // The ring keeps its width when silent, so names never shift.
+                        div()
+                            .flex_none()
+                            .rounded_full()
+                            .border_2()
+                            .border_color(if speaking {
+                                t.online
+                            } else {
+                                gpui::transparent_black()
+                            })
+                            .child(avatar(url, px(22.), None)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .when(speaking, |el| el.text_color(t.text))
+                            .child(name),
+                    )
                     .when(muted, |el| el.child(icon(Icon::MicOff).size(px(16.))))
                     .when(deafened, |el| {
                         el.child(icon(Icon::HeadphonesOff).size(px(16.)))
@@ -421,15 +448,42 @@ impl ChannelSidebar {
 
     /// Shown while this account sits in a voice channel, from this or another device.
     fn voice_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::voice::CallStatus;
         let t = theme(cx).clone();
         let s = self.state.read(cx);
-        let v = s.store.my_voice_state()?;
-        let channel = v.channel_id?;
+        let call = s.call.as_ref();
+        let (guild, channel) = match (call, s.store.my_voice_state()) {
+            (Some(c), _) => (c.guild, c.channel),
+            (None, Some(v)) => (v.guild_id, v.channel_id?),
+            (None, None) => return None,
+        };
         let name = s.store.channel_name(channel);
-        let place = v.guild_id.and_then(|g| s.store.guild(g)).map_or_else(
+        let place = guild.and_then(|g| s.store.guild(g)).map_or_else(
             || "Direct call".to_owned(),
             |g| format!("{name} / {}", g.guild.name),
         );
+        let (title, color) = match call.map(|c| c.status) {
+            Some(CallStatus::Connected { .. }) => ("Voice Connected", t.online),
+            Some(CallStatus::Reconnecting) => ("Reconnecting", t.idle),
+            Some(CallStatus::Joining | CallStatus::Connecting) => ("RTC Connecting", t.idle),
+            // In a call on another device.
+            None => ("Voice Connected Elsewhere", t.text_muted),
+        };
+        let encrypted = matches!(
+            call.map(|c| c.status),
+            Some(CallStatus::Connected { encrypted: true })
+        );
+        let mut detail = Vec::new();
+        if let Some(ms) = call.and_then(|c| c.latency) {
+            detail.push(format!("Ping {} ms", ms.as_millis()));
+        }
+        if encrypted {
+            detail.push("End-to-end encrypted".into());
+        }
+        if let Some(code) = call.and_then(|c| c.privacy_code.clone()) {
+            detail.push(format!("Privacy code {code}"));
+        }
+        let tip = detail.join("\n");
         let state = self.state.clone();
         Some(
             div()
@@ -444,16 +498,26 @@ impl ChannelSidebar {
                 .border_color(t.border)
                 .child(
                     div()
+                        .id("voice-status")
                         .flex_1()
                         .min_w_0()
                         .flex()
                         .flex_col()
+                        .when(!tip.is_empty(), |el| {
+                            el.tooltip(move |_, cx| Tooltip::view(tip.clone(), cx))
+                        })
                         .child(
                             div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.))
                                 .text_sm()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(t.online)
-                                .child("Voice Connected"),
+                                .text_color(color)
+                                .child(title)
+                                .when(encrypted, |el| {
+                                    el.child(icon(Icon::Lock).size(px(12.)).text_color(color))
+                                }),
                         )
                         .child(
                             div()

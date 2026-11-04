@@ -10,8 +10,31 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+aes-gcm = "0.10"
+async-channel.workspace = true
+# Links libopus statically everywhere, so packages carry no libopus dependency.
+audiopus_sys = { version = "0.2", features = ["static"] }
+chacha20poly1305 = "0.10"
+davey = "0.2"
+futures.workspace = true
+nnnoiseless = { version = "0.5", default-features = false }
+opus = "0.4"
+parking_lot.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+
+# PulseAudio (also served by PipeWire) gives devices their desktop names; ALSA stays as the
+# fallback.
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18", features = ["pulseaudio"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+cpal = "0.18"
 
 [lints]
 workspace = true

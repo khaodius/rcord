@@ -61,7 +61,12 @@
 - **Image cache** on disk for Discord's CDN, keyed by URL, so avatars, emoji and attachments seen
   once load instantly afterwards. Decoded images in memory are capped and evicted oldest first.
 
-Voice channels, video and screen share are not available yet; see the [roadmap](#roadmap).
+- **Voice channels and calls**: Opus audio at the channel's bitrate, Discord's end-to-end
+  encryption (DAVE) with the call's privacy code, noise suppression (RNNoise), voice activity
+  that adapts to the room or follows a fixed threshold, a jitter buffer per speaker with
+  forward error correction for lost packets, and speaking rings in the channel list.
+
+Video and screen share are not available yet; see the [roadmap](#roadmap).
 
 ## Install
 
@@ -183,11 +188,9 @@ Every shortcut can be changed in Settings > Keybinds.
 
 ## Roadmap
 
-- **Voice**: joining voice channels with Opus audio, end-to-end encryption (DAVE), push to talk,
-  voice activity and noise suppression. The voice gateway, transport encryption and RTP code is
-  in [`crates/rcord-voice`](crates/rcord-voice); until it can carry calls, rcord never joins a
-  voice channel, so it cannot sit in one silently.
-- **Video and screen share** with hardware encoding where available.
+- **Voice**: push to talk with a global key, echo cancellation, per-user volume in the
+  participant menu, and an input level meter in Settings.
+- **Screen share (Go Live)** and video with hardware encoding where available.
 - **Composer**: multi-line messages, editing your last message with Up, file uploads, emoji and
   mention autocomplete.
 - **Threads and forums** as their own views, pinned messages, and message search.
@@ -198,15 +201,18 @@ Every shortcut can be changed in Settings > Keybinds.
 ## Build from source
 
 Requires [Rust](https://rustup.rs) 1.88+. On Linux, also the development packages for
-xkbcommon, Wayland, X11, fontconfig, Vulkan and WebKitGTK (for the captcha window):
+xkbcommon, Wayland, X11, fontconfig, Vulkan, WebKitGTK (for the captcha window) and ALSA, plus
+CMake, which builds the bundled Opus codec:
 
 ```sh
 # Debian, Ubuntu
 sudo apt install pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
-  libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libwebkit2gtk-4.1-dev
+  libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libwebkit2gtk-4.1-dev \
+  libasound2-dev cmake
 # Fedora
 sudo dnf install pkg-config libxkbcommon-devel libxkbcommon-x11-devel wayland-devel \
-  libxcb-devel fontconfig-devel freetype-devel vulkan-loader-devel webkit2gtk4.1-devel
+  libxcb-devel fontconfig-devel freetype-devel vulkan-loader-devel webkit2gtk4.1-devel \
+  alsa-lib-devel cmake
 ```
 
 ```sh
@@ -238,7 +244,7 @@ The workspace is split so most of the client is tested without a window:
 | [`rcord-markup`](crates/rcord-markup)     | The markdown parser                                         |
 | [`rcord-auth`](crates/rcord-auth)         | Password, two-factor and QR sign-in, keychain storage       |
 | [`rcord-settings`](crates/rcord-settings) | Settings, defaults and the TOML file                        |
-| [`rcord-voice`](crates/rcord-voice)       | Voice gateway protocol and RTP, for calls                   |
+| [`rcord-voice`](crates/rcord-voice)       | Voice gateway, DAVE, RTP transport and the audio path       |
 | [`rcord-webview`](crates/rcord-webview)   | The small Discord window for captchas and web sign-in       |
 
 `third_party/xattr` is xattr 0.2.3 with one constant changed so it builds against current libc on

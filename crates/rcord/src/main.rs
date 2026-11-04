@@ -10,6 +10,7 @@ mod state;
 mod theme;
 mod ui;
 mod update;
+mod voice;
 mod webview;
 
 use std::borrow::Cow;
