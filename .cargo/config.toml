@@ -1,0 +1,5 @@
+[env]
+# The libopus sources bundled by audiopus_sys declare an old minimum CMake version, which
+# CMake 4 refuses unless a policy floor is set. Without this, building the Opus codec fails
+# on current CMake (GitHub's Windows runners, recent Linux distributions).
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
