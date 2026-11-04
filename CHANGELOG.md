@@ -3,17 +3,25 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
-## Unreleased
+## 0.1.7 - 2026-11-04
 
 - **Screen share (Go Live)**: the screen button in the voice bar shares your screen into the
-  voice channel. Pick a screen and a quality (720p or 1080p, 30 or 60 FPS); people in the
-  channel see a LIVE badge next to your name and can watch. On Wayland, rcord uses your
+  voice channel. Pick a screen, a resolution (720p, 1080p, 1440p or Source) and a frame rate
+  (15, 30 or 60 FPS); people in the channel see a LIVE badge next to your name and can watch. On Wayland, rcord uses your
   desktop's own sharing dialog, so you can pick a screen or a single window, and captures
   natively through PipeWire rather than XWayland. Video is H.264 and end-to-end encrypted like
   voice.
 - **Watch streams**: click the LIVE badge next to someone in a voice channel to watch their
   stream above the chat, with their sound mixed into the call. Lost packets are recovered by
   asking the streamer for a fresh keyframe.
+- **Right-click someone in a voice channel** for a menu like Discord's: Profile, Mention,
+  Message, a User Volume slider from 0 to 200%, Mute (for you alone), Watch Stream, and adding
+  or removing them as a friend. Volumes and mutes are saved per person. With the permissions
+  for them, it also offers Move To, Server Mute, Server Deafen, Disconnect, Kick and Ban, and
+  asks before a kick or ban. Copy User ID appears in developer mode.
+- **Settings > Voice > Screen share** sets the resolution and frame rate the Go Live dialog
+  starts with, and whether your pointer is drawn into the stream. The dialog remembers your
+  last choice.
 
 ## 0.1.6 - 2026-11-04
 
