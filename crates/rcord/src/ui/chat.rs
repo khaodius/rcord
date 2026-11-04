@@ -809,7 +809,13 @@ fn render_message(
     }
 
     let blocks: Vec<Block> = rcord_markup::parse(&m.content);
-    let body = if m.content.is_empty() {
+    // A message that is only a GIF link shows the GIF alone, as in Discord.
+    let only_gif = settings.chat.link_previews
+        && !m.embeds.is_empty()
+        && m.embeds
+            .iter()
+            .all(|e| e.is_gifv() && e.url.as_deref().is_some_and(|u| u == m.content.trim()));
+    let body = if m.content.is_empty() || only_gif {
         None
     } else {
         Some(markup::blocks(&blocks, &mcx))
@@ -822,7 +828,7 @@ fn render_message(
         compact,
     );
 
-    let mut content = div().flex().flex_col().min_w_0().gap(px(4.));
+    let mut content = div().w_full().flex().flex_col().min_w_0().gap(px(4.));
     if let Some(body) = body {
         content = content.child(
             div()
@@ -1035,7 +1041,7 @@ fn render_message(
                         })
                         .child(name_el)
                         .children(bot_tag)
-                        .child(div().flex_1().min_w_0().child(content)),
+                        .child(div().flex_1().min_w_0().flex().flex_col().child(content)),
                 ),
             )
             .into_any_element()
@@ -1112,6 +1118,9 @@ fn render_message(
     div()
         .id(snowflake_id("message", id))
         .group(group)
+        // The row spans the list, so its hover and mention highlight reach the far edge and
+        // content beside a name or GIF is not squeezed to its narrowest.
+        .w_full()
         .relative()
         .mt(spacing)
         .flex()
@@ -1453,6 +1462,7 @@ fn embed(e: &Embed, mcx: &MarkupCx<'_>, max_h: f32, index: usize) -> AnyElement 
             })
             .unwrap_or_default();
         return div()
+            .flex_none()
             .w(w)
             .h(h)
             .rounded(t.radius)

@@ -3,7 +3,7 @@
 
 use rcord_model::{
     Channel, Emoji, Guild, Member, Message, Presence, Relationship, Role, Snowflake, Sticker, User,
-    VoiceState,
+    UserGuildSettings, VoiceState,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -73,6 +73,7 @@ pub enum Update {
         threads: Vec<Channel>,
     },
     PresenceUpdate(Box<Presence>),
+    GuildSettings(Box<UserGuildSettings>),
     TypingStart(TypingStart),
     VoiceStateUpdate(Box<VoiceState>),
     /// Members asked for by user ID, such as voice participants not cached yet.
@@ -169,6 +170,40 @@ pub struct Ready {
     pub merged_members: Vec<Vec<Member>>,
     #[serde(default)]
     pub session_id: String,
+    #[serde(default)]
+    pub user_guild_settings: GuildSettingsList,
+}
+
+/// READY's `user_guild_settings`: an object with `entries` when versioned settings are
+/// asked for, a plain list otherwise. Kept raw and read item by item, so a shape rcord does
+/// not expect costs the settings and never the whole READY.
+#[derive(Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct GuildSettingsList(Option<Box<RawValue>>);
+
+impl GuildSettingsList {
+    pub fn into_vec(self) -> Vec<UserGuildSettings> {
+        #[derive(Deserialize)]
+        struct Versioned {
+            #[serde(default)]
+            entries: Vec<Box<RawValue>>,
+        }
+        let Some(raw) = self.0 else {
+            return Vec::new();
+        };
+        let items: Vec<Box<RawValue>> = serde_json::from_str::<Versioned>(raw.get())
+            .map(|v| v.entries)
+            .or_else(|_| serde_json::from_str(raw.get()))
+            .unwrap_or_default();
+        items
+            .into_iter()
+            .filter_map(|item| {
+                serde_json::from_str(item.get())
+                    .map_err(|e| tracing::warn!("skipping a server's notification settings: {e}"))
+                    .ok()
+            })
+            .collect()
+    }
 }
 
 /// Reads a list item by item, skipping items that do not parse, so one object in a shape
@@ -564,6 +599,7 @@ pub fn parse(name: &str, data: &RawValue) -> serde_json::Result<Update> {
             }
         }
         "PRESENCE_UPDATE" => Update::PresenceUpdate(Box::new(p(d)?)),
+        "USER_GUILD_SETTINGS_UPDATE" => Update::GuildSettings(Box::new(p(d)?)),
         "TYPING_START" => Update::TypingStart(p(d)?),
         "VOICE_STATE_UPDATE" => Update::VoiceStateUpdate(Box::new(p(d)?)),
         "GUILD_MEMBERS_CHUNK" => Update::GuildMembersChunk(Box::new(p(d)?)),

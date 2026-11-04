@@ -5,6 +5,7 @@
 mod build_number;
 mod demo;
 mod golive;
+mod guild_actions;
 mod image_cache;
 mod memory;
 mod net;
@@ -401,7 +402,7 @@ impl Render for Root {
         };
         let bar = custom_bar.then(|| {
             let t = theme(cx).clone();
-            ui::title_bar::title_bar("rcord", window, &t, Rc::new(close_main_window))
+            ui::title_bar::title_bar("", window, &t, Rc::new(close_main_window))
         });
         div()
             .size_full()

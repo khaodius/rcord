@@ -168,6 +168,8 @@ pub struct OverlayLayer {
     search: Entity<TextInput>,
     switcher: Entity<TextInput>,
     video: Option<Entity<VideoPlayer>>,
+    /// The name box in the channel and server menus.
+    menu_input: Entity<TextInput>,
     _subs: Vec<Subscription>,
 }
 
@@ -180,6 +182,7 @@ impl OverlayLayer {
     ) -> Self {
         let search = cx.new(|cx| TextInput::new("Search", cx));
         let switcher = cx.new(|cx| TextInput::new("Where would you like to go?", cx));
+        let menu_input = cx.new(|cx| TextInput::new("new-channel", cx));
         let mut subs = vec![cx.subscribe(&state, |_, _, event, cx| {
             if matches!(
                 event,
@@ -230,12 +233,27 @@ impl OverlayLayer {
                 InputEvent::UpInEmpty => {}
             },
         ));
+        subs.push(cx.subscribe_in(
+            &menu_input,
+            window,
+            |this, input, event, _window, cx| match event {
+                InputEvent::Submit => {
+                    let text = input.read(cx).text().to_owned();
+                    this.state.update(cx, |s, cx| {
+                        submit_menu_name(s, text, cx);
+                    });
+                }
+                InputEvent::Cancel => this.state.update(cx, |s, cx| s.set_overlay(None, cx)),
+                _ => {}
+            },
+        ));
         Self {
             state,
             chat,
             search,
             switcher,
             video: None,
+            menu_input,
             _subs: subs,
         }
     }
@@ -1126,6 +1144,28 @@ impl Render for OverlayLayer {
             Some(Overlay::Menu { at, items }) => {
                 root = scrim_close(root, self.state.clone()).child(self.menu(at, items, cx));
             }
+            Some(Overlay::ChannelMenu { channel, at, page }) => {
+                let menu = crate::ui::context_menus::channel_menu(
+                    &self.state,
+                    &self.menu_input,
+                    channel,
+                    at,
+                    page,
+                    cx,
+                );
+                root = scrim_close(root, self.state.clone()).child(menu);
+            }
+            Some(Overlay::GuildMenu { guild, at, page }) => {
+                let menu = crate::ui::context_menus::guild_menu(
+                    &self.state,
+                    &self.menu_input,
+                    guild,
+                    at,
+                    page,
+                    cx,
+                );
+                root = scrim_close(root, self.state.clone()).child(menu);
+            }
             Some(Overlay::UserMenu {
                 user,
                 channel,
@@ -1203,4 +1243,36 @@ impl Render for OverlayLayer {
         }
         root.children(self.toasts(cx))
     }
+}
+
+/// Enter in a menu's name box does what its Create or Save row does.
+fn submit_menu_name(s: &mut AppState, text: String, cx: &mut Context<AppState>) {
+    use crate::state::{ChannelMenuPage, GuildMenuPage};
+    match s.overlay.clone() {
+        Some(Overlay::ChannelMenu { channel, page, .. }) => {
+            let c = s.store.channel(channel);
+            let guild = c.and_then(|c| c.guild_id);
+            let parent = c.and_then(|c| {
+                if c.kind == rcord_model::ChannelKind::Category {
+                    Some(c.id)
+                } else {
+                    c.parent_id
+                }
+            });
+            match (page, guild) {
+                (ChannelMenuPage::Rename, _) => s.rename_channel(channel, text, cx),
+                (ChannelMenuPage::CreateText, Some(g)) => {
+                    s.create_channel(g, text, false, parent, cx)
+                }
+                _ => return,
+            }
+        }
+        Some(Overlay::GuildMenu { guild, page, .. }) => match page {
+            GuildMenuPage::CreateText => s.create_channel(guild, text, false, None, cx),
+            GuildMenuPage::CreateCategory => s.create_channel(guild, text, true, None, cx),
+            _ => return,
+        },
+        _ => return,
+    }
+    s.set_overlay(None, cx);
 }

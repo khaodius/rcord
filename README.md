@@ -13,9 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
 </p>
 
-![rcord with a server open on #general, the channel list on the left and the member list grouped by role on the right](.github/assets/screenshot.png)
-
-<p align="center"><sub>Shown with the built-in sample data (<code>RCORD_DEMO=1</code>); every name is invented.</sub></p>
+![rcord in the Midnight theme with a server open on #general, the channel list on the left and the member list grouped by role on the right](.github/assets/screenshot.png)
 
 ## Features
 

@@ -7,7 +7,7 @@ use gpui::{
 use rcord_model::{Snowflake, cdn};
 use rcord_store::Change;
 
-use crate::state::{AppState, MenuItem, Overlay, StateEvent};
+use crate::state::{AppState, GuildMenuPage, Overlay, StateEvent};
 use crate::theme::theme;
 use crate::ui::anim_img;
 use crate::ui::icons::{Icon, icon};
@@ -196,7 +196,6 @@ impl Render for ServerRail {
         let selected_guild = state.guild;
         let animate = state.settings.appearance.animate_avatars;
         let show_names = state.settings.appearance.server_names;
-        let dev = state.settings.advanced.developer_mode;
         let dm_mentions: u32 = state
             .store
             .private_channels()
@@ -291,7 +290,6 @@ impl Render for ServerRail {
             let state = self.state.clone();
             let drop_state = self.state.clone();
             let drop_order = order_now.clone();
-            let menu_name = name.clone();
             let item = self.item(
                 Some(id),
                 selected_guild == Some(id),
@@ -331,28 +329,15 @@ impl Render for ServerRail {
                 })
                 .on_mouse_up(MouseButton::Right, move |e, _, cx| {
                     let at = e.position;
-                    let mut items = vec![MenuItem {
-                        label: "Mark as read".into(),
-                        danger: false,
-                        action: std::rc::Rc::new({
-                            let state = state.clone();
-                            move |cx| state.update(cx, |s, cx| s.mark_guild_read(id, cx))
-                        }),
-                    }];
-                    if dev {
-                        items.push(MenuItem {
-                            label: "Copy server ID".into(),
-                            danger: false,
-                            action: std::rc::Rc::new(move |cx| {
-                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                    id.to_string(),
-                                ))
-                            }),
-                        });
-                    }
-                    let _ = &menu_name;
                     state.update(cx, |s, cx| {
-                        s.set_overlay(Some(Overlay::Menu { at, items }), cx)
+                        s.set_overlay(
+                            Some(Overlay::GuildMenu {
+                                guild: id,
+                                at,
+                                page: GuildMenuPage::Main,
+                            }),
+                            cx,
+                        )
                     });
                 });
             list = list.child(wrapped);

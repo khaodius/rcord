@@ -10,7 +10,8 @@ use rcord_store::{Change, MemberRow};
 
 use crate::state::{AppState, StateEvent};
 use crate::theme::theme;
-use crate::ui::{avatar, section_label, snowflake_id, user_avatar_url};
+use crate::ui::icons::{Icon, icon};
+use crate::ui::{Tooltip, avatar, section_label, snowflake_id, user_avatar_url};
 
 pub struct MemberList {
     state: Entity<AppState>,
@@ -139,6 +140,10 @@ fn member_row(
                 .map(|a| a.summary())
                 .filter(|a| !a.is_empty());
             let bot = user.bot;
+            let owner = s
+                .store
+                .guild(guild)
+                .is_some_and(|e| e.guild.owner_id == Some(user_id));
             let url = user_avatar_url(user, 32., false);
             let state = state.clone();
             div()
@@ -172,6 +177,19 @@ fn member_row(
                                         .text_color(color.unwrap_or(t.text))
                                         .child(name),
                                 )
+                                .when(owner, |el| {
+                                    el.child(
+                                        div()
+                                            .id(snowflake_id("owner", user_id))
+                                            .flex_none()
+                                            .tooltip(|_, cx| Tooltip::view("Server Owner", cx))
+                                            .child(
+                                                icon(Icon::Crown)
+                                                    .size(px(14.))
+                                                    .text_color(gpui::rgb(0xf0b232)),
+                                            ),
+                                    )
+                                })
                                 .when(bot, |el| {
                                     el.child(
                                         div()

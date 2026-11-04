@@ -28,6 +28,7 @@ pub fn title_bar(
     t: &Theme,
     on_close: OnClose,
 ) -> gpui::AnyElement {
+    let title: SharedString = title.into();
     let maximized = window.is_maximized();
     let button = |id: &'static str, which: Icon, area: WindowControlArea, danger: bool| {
         div()
@@ -65,10 +66,13 @@ pub fn title_bar(
                 .pl(px(12.))
                 .flex()
                 .items_center()
+                .gap(px(6.))
                 .text_xs()
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(t.text_faint)
-                .child(title.into())
+                // The mark takes the accent color, so it follows the theme.
+                .child(icon(Icon::Logo).size(px(16.)).text_color(t.accent))
+                .when(!title.is_empty(), |el| el.child(title))
                 .when(cfg!(windows), |el| {
                     el.window_control_area(WindowControlArea::Drag)
                 })

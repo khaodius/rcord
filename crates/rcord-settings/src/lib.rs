@@ -145,7 +145,9 @@ pub struct Appearance {
     pub custom_theme: Option<ThemeFile>,
     /// Draws rcord's own title bar with minimize, maximize and close instead of the system's.
     pub custom_title_bar: bool,
-    /// What the button at the top of the server list shows.
+    /// What the button at the top of the server list shows. Saved under a new key since
+    /// the default became the friends icon, so earlier saved defaults do not keep the logo.
+    #[serde(rename = "home_button")]
     pub home_icon: HomeIcon,
     /// The picture for [`HomeIcon::Image`].
     pub home_icon_path: Option<String>,
@@ -155,8 +157,8 @@ pub struct Appearance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HomeIcon {
-    #[default]
     Logo,
+    #[default]
     Friends,
     Avatar,
     Image,
@@ -199,7 +201,7 @@ impl Default for Appearance {
             // Wayland compositors such as GNOME draw no title bar for rcord at all, so Linux
             // gets rcord's own by default; Windows keeps the system one.
             custom_title_bar: cfg!(target_os = "linux"),
-            home_icon: HomeIcon::Logo,
+            home_icon: HomeIcon::Friends,
             home_icon_path: None,
         }
     }
