@@ -3,6 +3,21 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
+## 0.1.1 - 2026-11-04
+
+- **Email or phone and password sign-in**, laid out like Discord's login screen, with
+  two-factor codes from an authenticator app, by SMS or from a backup code, and password
+  reset links.
+- **Captchas**: when Discord asks for one, during a password or QR code sign-in, it opens in a
+  small Discord window and the sign-in carries on once it is solved. QR code sign-ins that
+  failed with "400 Bad Request" were Discord asking for a captcha rcord could not show.
+- **Sign in on Discord's page**, in that same window, for anything else Discord asks during a
+  sign-in. Token sign-in moved to a link below the form.
+- Discord's error messages are shown as Discord words them, such as "Login or password is
+  invalid.", instead of the HTTP status.
+- rcord now identifies itself to Discord the way Discord's web client does, matching the build
+  number it reads from the web client.
+
 ## 0.1.0 - 2026-11-03
 
 First release.

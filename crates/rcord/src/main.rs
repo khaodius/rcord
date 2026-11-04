@@ -9,6 +9,7 @@ mod net;
 mod state;
 mod theme;
 mod ui;
+mod webview;
 
 use std::borrow::Cow;
 use std::sync::Arc;

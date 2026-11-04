@@ -17,12 +17,9 @@ use sha2::{Digest, Sha256};
 /// read from Discord once. Settings > Advanced overrides it.
 pub const DEFAULT_BUILD_NUMBER: u64 = 400_000;
 
+/// The user agent for every request, the same browser the client properties describe.
 pub fn user_agent() -> String {
-    let os = match std::env::consts::OS {
-        "windows" => "Windows NT 10.0; Win64; x64",
-        _ => "X11; Linux x86_64",
-    };
-    format!("Mozilla/5.0 ({os}) rcord/{}", env!("CARGO_PKG_VERSION"))
+    rcord_gateway::protocol::browser_user_agent()
 }
 
 pub struct Net {

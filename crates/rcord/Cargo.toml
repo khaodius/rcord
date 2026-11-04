@@ -56,6 +56,7 @@ depends = "$auto, libvulkan1"
 recommends = "gnome-keyring | kwalletmanager"
 assets = [
     ["target/release/rcord", "usr/bin/", "755"],
+    ["target/release/rcord-webview", "usr/bin/", "755"],
     ["../../packaging/linux/rcord.desktop", "usr/share/applications/", "644"],
     ["../../assets/icons/rcord-32.png", "usr/share/icons/hicolor/32x32/apps/rcord.png", "644"],
     ["../../assets/icons/rcord-64.png", "usr/share/icons/hicolor/64x64/apps/rcord.png", "644"],
@@ -71,6 +72,7 @@ summary = "A fast, native Discord client"
 license = "Apache-2.0"
 assets = [
     { source = "target/release/rcord", dest = "/usr/bin/rcord", mode = "755" },
+    { source = "target/release/rcord-webview", dest = "/usr/bin/rcord-webview", mode = "755" },
     { source = "packaging/linux/rcord.desktop", dest = "/usr/share/applications/rcord.desktop", mode = "644" },
     { source = "assets/icons/rcord-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/rcord.png", mode = "644" },
     { source = "assets/icons/rcord-64.png", dest = "/usr/share/icons/hicolor/64x64/apps/rcord.png", mode = "644" },

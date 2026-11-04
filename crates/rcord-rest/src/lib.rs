@@ -142,7 +142,7 @@ impl Client {
         path: &str,
         body: Option<&B>,
     ) -> Result<()> {
-        self.execute(method, path, body).await.map(drop)
+        self.execute(method, path, body, &[]).await.map(drop)
     }
 
     pub async fn request<B: Serialize + ?Sized, T: DeserializeOwned>(
@@ -151,7 +151,18 @@ impl Client {
         path: &str,
         body: Option<&B>,
     ) -> Result<T> {
-        let bytes = self.execute(method, path, body).await?;
+        self.request_with(method, path, body, &[]).await
+    }
+
+    /// [`Client::request`] with extra headers, such as a solved captcha.
+    pub async fn request_with<B: Serialize + ?Sized, T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&B>,
+        headers: &[(&'static str, String)],
+    ) -> Result<T> {
+        let bytes = self.execute(method, path, body, headers).await?;
         let bytes = if bytes.is_empty() {
             &b"null"[..]
         } else {
@@ -165,6 +176,7 @@ impl Client {
         method: Method,
         path: &str,
         body: Option<&B>,
+        headers: &[(&'static str, String)],
     ) -> Result<bytes::Bytes> {
         let route = ratelimit::route_key(&method, path);
         let encoded = body.map(serde_json::to_vec).transpose()?;
@@ -177,6 +189,9 @@ impl Client {
                 .request(method.clone(), format!("{}{path}", self.inner.base));
             if let Some(token) = &self.inner.token {
                 req = req.header(http::header::AUTHORIZATION, token.as_ref());
+            }
+            for (name, value) in headers {
+                req = req.header(*name, value.as_str());
             }
             if let Some(body) = &encoded {
                 req = req
@@ -207,16 +222,16 @@ impl Client {
                 continue;
             }
             if !status.is_success() {
-                let err: ApiErrorBody = serde_json::from_slice(&bytes).unwrap_or_default();
+                let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+                let err: ApiErrorBody = serde_json::from_value(raw.clone()).unwrap_or_default();
+                let message = first_field_error(&raw)
+                    .or(err.message)
+                    .unwrap_or_else(|| status.canonical_reason().unwrap_or("error").into());
                 return Err(Error::Api {
                     status,
                     code: err.code,
-                    message: err
-                        .message
-                        .unwrap_or_else(|| status.canonical_reason().unwrap_or("error").into()),
-                    captcha: err
-                        .captcha_key
-                        .map(|_| serde_json::from_slice(&bytes).unwrap_or_default()),
+                    message,
+                    captcha: err.captcha_key.map(|_| raw),
                 });
             }
             return Ok(bytes);
@@ -240,4 +255,47 @@ struct ApiErrorBody {
     message: Option<String>,
     #[serde(default)]
     captcha_key: Option<serde_json::Value>,
+}
+
+/// The first per-field message of a form error, such as "Login or password is invalid." in
+/// `{"errors": {"login": {"_errors": [{"message": "..."}]}}}`, which says more than the
+/// top-level "Invalid Form Body".
+fn first_field_error(body: &serde_json::Value) -> Option<String> {
+    fn walk(v: &serde_json::Value) -> Option<String> {
+        let obj = v.as_object()?;
+        if let Some(m) = obj
+            .get("_errors")
+            .and_then(|e| e.as_array())
+            .and_then(|list| {
+                list.iter()
+                    .find_map(|e| e.get("message").and_then(|m| m.as_str()))
+            })
+        {
+            return Some(m.to_owned());
+        }
+        obj.values().find_map(walk)
+    }
+    walk(body.get("errors")?)
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn reads_field_errors() {
+        let body = serde_json::json!({
+            "code": 50035,
+            "errors": {"login": {"_errors": [{"code": "INVALID_LOGIN", "message": "Login or password is invalid."}]}},
+            "message": "Invalid Form Body"
+        });
+        assert_eq!(
+            first_field_error(&body).as_deref(),
+            Some("Login or password is invalid.")
+        );
+        assert_eq!(
+            first_field_error(&serde_json::json!({"message": "x"})),
+            None
+        );
+    }
 }

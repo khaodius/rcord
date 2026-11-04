@@ -42,9 +42,11 @@
 - **Unread state** synced with your other devices: unread channels, mention counts on channels and
   servers, mark as read, and jumping between unread channels from the keyboard.
 - **Quick switcher** (Ctrl + K) across every server and DM, unread ones first.
-- **Sign in** with a QR code from the Discord mobile app, or with a token. The token is checked
-  with Discord and kept in the system keychain (Windows Credential Manager, or the Secret Service
-  of GNOME Keyring or KWallet), never in a file.
+- **Sign in** like Discord's login screen: email or phone number and password with two-factor
+  codes (authenticator app, SMS or backup code), a QR code for the Discord mobile app, or
+  Discord's own sign-in page. When Discord asks for a captcha, it opens in a small Discord
+  window and the sign-in carries on. The token is kept in the system keychain (Windows
+  Credential Manager, or the Secret Service of GNOME Keyring or KWallet), never in a file.
 - **Settings** for everything Discord has and more for the look of the app: four themes including
   an OLED black, any accent color, interface zoom, chat font size, cozy or compact messages, group
   spacing, corner roundness, saturation, interface and code fonts, role color style, animation
@@ -106,7 +108,7 @@ curl -fsSL https://raw.githubusercontent.com/khaodius/rcord/main/scripts/install
 
 The scripts are in [`scripts/`](scripts) to read before running. To remove rcord, use Installed
 apps in Windows Settings, `sudo apt remove rcord` or `sudo dnf remove rcord`, or delete
-`~/.local/bin/rcord` and `~/.local/share/applications/rcord.desktop`.
+`~/.local/bin/rcord`, `~/.local/bin/rcord-webview` and `~/.local/share/applications/rcord.desktop`.
 
 Or download a package from the [latest release](https://github.com/khaodius/rcord/releases/latest):
 
@@ -145,6 +147,9 @@ The Windows builds are not code-signed yet, so SmartScreen may warn about an unk
   trimmed to the size set in Settings > Advanced at each start.
 - **Keychain on Linux**: the token is stored through the Secret Service API, which GNOME Keyring
   and KWallet provide. Without either, rcord still signs in but asks again at the next start.
+- **Captcha window**: the captcha and Discord's own sign-in page open in `rcord-webview`, a
+  small window that uses the system's web engine: WebView2 on Windows, which Windows 10 and 11
+  include, and WebKitGTK on Linux, which the .deb and .rpm install.
 - **Graphics**: Linux needs a Vulkan driver (Mesa's is included with most distributions). rcord
   runs on Wayland and X11 and picks whichever the session uses.
 - **Client version**: Discord updates its web client several times a day. rcord reads the
@@ -191,15 +196,15 @@ Every shortcut can be changed in Settings > Keybinds.
 ## Build from source
 
 Requires [Rust](https://rustup.rs) 1.88+. On Linux, also the development packages for
-xkbcommon, Wayland, X11, fontconfig and Vulkan:
+xkbcommon, Wayland, X11, fontconfig, Vulkan and WebKitGTK (for the captcha window):
 
 ```sh
 # Debian, Ubuntu
 sudo apt install pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
-  libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev
+  libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libwebkit2gtk-4.1-dev
 # Fedora
 sudo dnf install pkg-config libxkbcommon-devel libxkbcommon-x11-devel wayland-devel \
-  libxcb-devel fontconfig-devel freetype-devel vulkan-loader-devel
+  libxcb-devel fontconfig-devel freetype-devel vulkan-loader-devel webkit2gtk4.1-devel
 ```
 
 ```sh
@@ -229,9 +234,10 @@ The workspace is split so most of the client is tested without a window:
 | [`rcord-rest`](crates/rcord-rest)         | The HTTP API with per-route rate limits                     |
 | [`rcord-store`](crates/rcord-store)       | The cache that gateway events and API pages are applied to  |
 | [`rcord-markup`](crates/rcord-markup)     | The markdown parser                                         |
-| [`rcord-auth`](crates/rcord-auth)         | QR code sign-in and keychain storage                        |
+| [`rcord-auth`](crates/rcord-auth)         | Password, two-factor and QR sign-in, keychain storage       |
 | [`rcord-settings`](crates/rcord-settings) | Settings, defaults and the TOML file                        |
 | [`rcord-voice`](crates/rcord-voice)       | Voice gateway protocol and RTP, for calls                   |
+| [`rcord-webview`](crates/rcord-webview)   | The small Discord window for captchas and web sign-in       |
 
 `third_party/xattr` is xattr 0.2.3 with one constant changed so it builds against current libc on
 Linux; [its README](third_party/xattr/README.md) explains why.

@@ -86,17 +86,39 @@ impl Default for Capabilities {
     }
 }
 
-/// What the client reports about itself. Discord uses these for analytics and session
-/// lists under Settings > Devices.
+/// The Chrome release rcord presents itself as. Discord's web client is what the build
+/// number is read from, so rcord reports the same browser shape it does.
+pub const CHROME_VERSION: &str = "142.0.0.0";
+
+/// The user agent of the browser rcord presents itself as, matching [`ClientProperties`].
+pub fn browser_user_agent() -> String {
+    let platform = match std::env::consts::OS {
+        "windows" => "Windows NT 10.0; Win64; x64",
+        _ => "X11; Linux x86_64",
+    };
+    format!(
+        "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{CHROME_VERSION} Safari/537.36"
+    )
+}
+
+/// What the client reports about itself, in the shape Discord's web client sends. Discord
+/// uses these for analytics and the session list under Settings > Devices, and checks that
+/// they agree with the user agent.
 #[derive(Debug, Clone, Serialize)]
 pub struct ClientProperties {
     pub os: String,
     pub browser: String,
     pub device: String,
     pub system_locale: String,
-    pub client_version: String,
-    pub release_channel: String,
+    pub has_client_mods: bool,
+    pub browser_user_agent: String,
+    pub browser_version: String,
     pub os_version: String,
+    pub referrer: String,
+    pub referring_domain: String,
+    pub referrer_current: String,
+    pub referring_domain_current: String,
+    pub release_channel: String,
     pub client_build_number: u64,
     pub client_event_source: Option<String>,
 }
@@ -105,17 +127,26 @@ impl ClientProperties {
     pub fn for_this_system(build_number: u64, locale: &str) -> Self {
         let os = match std::env::consts::OS {
             "windows" => "Windows",
-            "macos" => "Mac OS X",
             _ => "Linux",
         };
         Self {
             os: os.into(),
-            browser: "Discord Client".into(),
+            browser: "Chrome".into(),
             device: String::new(),
             system_locale: locale.into(),
-            client_version: env!("CARGO_PKG_VERSION").into(),
+            has_client_mods: false,
+            browser_user_agent: browser_user_agent(),
+            browser_version: CHROME_VERSION.into(),
+            os_version: if os == "Windows" {
+                "10".into()
+            } else {
+                String::new()
+            },
+            referrer: String::new(),
+            referring_domain: String::new(),
+            referrer_current: String::new(),
+            referring_domain_current: String::new(),
             release_channel: "stable".into(),
-            os_version: String::new(),
             client_build_number: build_number,
             client_event_source: None,
         }

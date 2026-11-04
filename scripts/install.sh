@@ -105,6 +105,12 @@ install_user() {
   cp "$unpacked/rcord" "$target.partial"
   chmod 755 "$target.partial"
   mv -f "$target.partial" "$target"
+  # The small Discord window used for captchas; it needs WebKitGTK at runtime.
+  if [ -x "$unpacked/rcord-webview" ]; then
+    cp "$unpacked/rcord-webview" "$bin_directory/rcord-webview.partial"
+    chmod 755 "$bin_directory/rcord-webview.partial"
+    mv -f "$bin_directory/rcord-webview.partial" "$bin_directory/rcord-webview"
+  fi
 
   cp -R "$unpacked/share/icons/hicolor" "$data_directory/icons/"
   sed "s|^Exec=.*|Exec=\"$target\" %U|" "$unpacked/share/applications/rcord.desktop" > "$data_directory/applications/rcord.desktop"

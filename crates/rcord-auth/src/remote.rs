@@ -25,8 +25,6 @@ pub enum RemoteAuthError {
     Protocol(String),
     #[error("could not decrypt: {0}")]
     Crypto(String),
-    #[error("could not exchange the ticket: {0}")]
-    Ticket(#[from] rcord_rest::Error),
 }
 
 /// The account shown on the phone once the code is scanned.
@@ -46,6 +44,15 @@ pub enum RemoteAuthEvent {
     Scanned(ScannedUser),
     /// Approved. The token is the account's.
     Token(String),
+}
+
+/// How an approved QR sign-in ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteAuthFinish {
+    /// The account's token, ready to use.
+    Token(String),
+    /// A ticket to exchange for the token with [`RemoteAuth::exchange`].
+    Ticket(String),
 }
 
 #[derive(Deserialize)]
@@ -94,6 +101,8 @@ struct TicketBody<'a> {
     ticket: &'a str,
 }
 
+const TICKET_PATH: &str = "/users/@me/remote-auth/login";
+
 #[derive(Deserialize)]
 struct TicketResponse {
     encrypted_token: String,
@@ -128,13 +137,12 @@ impl RemoteAuth {
             .map_err(|e| RemoteAuthError::Crypto(e.to_string()))
     }
 
-    /// Runs the exchange, reporting each step to `on_event`, until a token arrives or the
-    /// attempt fails. `rest` is an unauthenticated client used for the ticket exchange.
+    /// Runs the handshake, reporting each step to `on_event`, until the phone approves or the
+    /// attempt fails.
     pub async fn run(
-        self,
-        rest: &rcord_rest::Client,
+        &self,
         mut on_event: impl FnMut(RemoteAuthEvent),
-    ) -> Result<String, RemoteAuthError> {
+    ) -> Result<RemoteAuthFinish, RemoteAuthError> {
         let mut request = REMOTE_AUTH_URL
             .into_client_request()
             .map_err(|e| RemoteAuthError::Connect(e.to_string()))?;
@@ -217,26 +225,41 @@ impl RemoteAuth {
                     }
                 }
                 Incoming::PendingLogin { ticket } => {
-                    let res: TicketResponse = rest
-                        .post(
-                            "/users/@me/remote-auth/login",
-                            &TicketBody { ticket: &ticket },
-                        )
-                        .await?;
-                    let token = self.decrypt_token(&res.encrypted_token)?;
-                    on_event(RemoteAuthEvent::Token(token.clone()));
-                    return Ok(token);
+                    return Ok(RemoteAuthFinish::Ticket(ticket));
                 }
                 Incoming::PendingFinish { encrypted_token }
                 | Incoming::Finish { encrypted_token } => {
                     let token = self.decrypt_token(&encrypted_token)?;
                     on_event(RemoteAuthEvent::Token(token.clone()));
-                    return Ok(token);
+                    return Ok(RemoteAuthFinish::Token(token));
                 }
                 Incoming::Cancel => return Err(RemoteAuthError::Cancelled),
                 Incoming::HeartbeatAck | Incoming::Other => {}
             }
         }
+    }
+
+    /// Exchanges the ticket from an approved scan for the token. Discord may ask for a
+    /// captcha first; solve it and call this again with the solution.
+    pub async fn exchange(
+        &self,
+        rest: &rcord_rest::Client,
+        ticket: &str,
+        captcha: Option<&crate::CaptchaSolution>,
+    ) -> Result<String, crate::LoginError> {
+        let headers = captcha
+            .map(crate::CaptchaSolution::headers)
+            .unwrap_or_default();
+        let res: TicketResponse = rest
+            .request_with(
+                http::Method::POST,
+                TICKET_PATH,
+                Some(&TicketBody { ticket }),
+                &headers,
+            )
+            .await?;
+        self.decrypt_token(&res.encrypted_token)
+            .map_err(|e| crate::LoginError::Rejected(e.to_string()))
     }
 
     fn decrypt_token(&self, b64: &str) -> Result<String, RemoteAuthError> {

@@ -89,7 +89,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
-            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev \
+            libwebkit2gtk-4.1-dev
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -98,7 +99,7 @@ jobs:
           tool: cargo-deb,cargo-generate-rpm
 
       - name: Build
-        run: cargo build --release --locked -p rcord
+        run: cargo build --release --locked -p rcord -p rcord-webview
 
       - name: Package
         run: |
@@ -108,6 +109,7 @@ jobs:
           root="rcord-${VERSION}-x86_64-linux"
           mkdir -p "$root/share/applications"
           install -m 755 target/release/rcord "$root/rcord"
+          install -m 755 target/release/rcord-webview "$root/rcord-webview"
           install -m 644 packaging/linux/rcord.desktop "$root/share/applications/rcord.desktop"
           for size in 32 64 128 256 512; do
             install -D -m 644 "assets/icons/rcord-$size.png" "$root/share/icons/hicolor/${size}x${size}/apps/rcord.png"
@@ -137,7 +139,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build
-        run: cargo build --release --locked -p rcord
+        run: cargo build --release --locked -p rcord -p rcord-webview
 
       - name: Package
         shell: pwsh
@@ -153,7 +155,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "iscc failed with $LASTEXITCODE" }
           $portable = "rcord-$env:VERSION-x64-windows"
           New-Item -ItemType Directory -Force $portable | Out-Null
-          Copy-Item target\release\rcord.exe, LICENSE, README.md, CHANGELOG.md $portable
+          Copy-Item target\release\rcord.exe, target\release\rcord-webview.exe, LICENSE, README.md, CHANGELOG.md $portable
           Compress-Archive -Path $portable -DestinationPath "dist\$portable.zip"
           Get-ChildItem dist
 
