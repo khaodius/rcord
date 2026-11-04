@@ -889,7 +889,9 @@ impl Render for Workspace {
             .child(self.pointer_watch(cx))
             .when(self.resize.is_some(), |el| el.cursor_col_resize())
             .when(lift.is_some(), |el| el.cursor_grabbing())
-            .child(row);
+            // Settings covers the whole window, so the panels under it are not drawn: every
+            // change made in Settings would otherwise lay out the chat and lists again too.
+            .when(settings_page.is_none(), |el| el.child(row));
 
         if let Some(l) = lift.filter(|l| detachable(l.panel)) {
             let zone = self.pop_zone.clone();

@@ -3,6 +3,19 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
+## 0.1.8 - 2026-11-04
+
+- **Smoother Settings**: changes in Settings, Appearance above all, apply without the stutter.
+  The panels under Settings are no longer drawn while it is open. Settings no longer redraws for
+  every message, typing indicator and status change arriving in the background. Changing a
+  setting no longer asks the desktop to redecorate the window.
+- **Status changes show at once** in a server's member list. Before, a member's new status
+  waited for the next member list update from Discord.
+- **rcord title bar on Windows**: turning it on or off reopens the window in the same place
+  with or without the Windows title bar. Before, it drew under the Windows one until rcord was
+  restarted.
+- The CI badge in the README follows `main` only.
+
 ## 0.1.7 - 2026-11-04
 
 - **Screen share (Go Live)**: the screen button in the voice bar shares your screen into the

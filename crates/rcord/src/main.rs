@@ -72,6 +72,10 @@ struct Root {
     workspace: Option<Entity<Workspace>>,
     update: UpdateUi,
     _update_task: Option<Task<()>>,
+    /// Whether the window was opened without the system title bar. Windows cannot drop or
+    /// restore it on an open window, so changing the setting there opens a new window.
+    own_bar: bool,
+    decorations: gpui::WindowDecorations,
     _subs: Vec<Subscription>,
 }
 
@@ -90,10 +94,24 @@ impl Root {
                 }
                 StateEvent::Settings => {
                     let s = state.read(cx);
-                    window.request_decorations(decorations(&s.settings));
+                    // Asking again makes some compositors redecorate and resize the window,
+                    // which turned every settings change into a full relayout.
+                    let wanted = decorations(&s.settings);
+                    if this.decorations != wanted {
+                        this.decorations = wanted;
+                        window.request_decorations(wanted);
+                    }
+                    let own_bar = s.settings.appearance.custom_title_bar;
                     let budget = s.settings.advanced.image_cache_mb as usize * 1024 * 1024;
                     window.set_rem_size(px(16.0 * s.settings.appearance.ui_scale));
                     this.images.update(cx, |c, _| c.set_budget(budget));
+                    if cfg!(windows) && own_bar != this.own_bar {
+                        this.own_bar = own_bar;
+                        let bounds = window.window_bounds();
+                        let state = state.clone();
+                        let old = window.window_handle();
+                        cx.defer(move |cx| reopen_main_window(state, bounds, old, cx));
+                    }
                 }
                 StateEvent::Store(_) if this.workspace.is_none() => cx.notify(),
                 _ => {}
@@ -111,6 +129,8 @@ impl Root {
             workspace: None,
             update: UpdateUi::None,
             _update_task: None,
+            own_bar: state.read(cx).settings.appearance.custom_title_bar,
+            decorations: decorations(&state.read(cx).settings),
             _subs: subs,
         };
         this.sync_screen(state, window, cx);
@@ -373,7 +393,12 @@ impl Render for Root {
             _ => None,
         };
         let prompt = self.update_prompt(cx);
-        let custom_bar = self.state.read(cx).settings.appearance.custom_title_bar;
+        // Until a Windows window is reopened it keeps the title bar it was opened with.
+        let custom_bar = if cfg!(windows) {
+            self.own_bar
+        } else {
+            self.state.read(cx).settings.appearance.custom_title_bar
+        };
         let bar = custom_bar.then(|| {
             let t = theme(cx).clone();
             ui::title_bar::title_bar("rcord", window, &t, Rc::new(close_main_window))
@@ -461,9 +486,35 @@ fn show_main_window(cx: &mut App) {
     }
 }
 
+/// Replaces the main window with a new one in the same place, for a title bar change on
+/// Windows. The new window opens before the old one closes, so rcord does not quit.
+fn reopen_main_window(
+    state: Entity<AppState>,
+    bounds: WindowBounds,
+    old: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
+    close_panel_windows(cx);
+    match open_main_window_at(state, false, Some(bounds), cx) {
+        Ok(_) => {
+            old.update(cx, |_, window, _| window.remove_window()).ok();
+        }
+        Err(e) => tracing::error!("could not reopen the window: {e}"),
+    }
+}
+
 fn open_main_window(
     state: Entity<AppState>,
     minimized: bool,
+    cx: &mut App,
+) -> anyhow::Result<gpui::WindowHandle<Root>> {
+    open_main_window_at(state, minimized, None, cx)
+}
+
+fn open_main_window_at(
+    state: Entity<AppState>,
+    minimized: bool,
+    bounds: Option<WindowBounds>,
     cx: &mut App,
 ) -> anyhow::Result<gpui::WindowHandle<Root>> {
     let settings = &state.read(cx).settings;
@@ -477,11 +528,9 @@ fn open_main_window(
             ..Default::default()
         }),
         window_decorations,
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(1280.), px(800.)),
-            cx,
-        ))),
+        window_bounds: Some(bounds.unwrap_or_else(|| {
+            WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(800.)), cx))
+        })),
         window_min_size: Some(size(px(940.), px(520.))),
         app_id: Some("rcord".into()),
         focus: !minimized,
