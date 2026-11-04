@@ -3,6 +3,23 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
+## 0.1.6 - 2026-11-04
+
+- **Voice channels show who is already in them** when rcord starts, instead of only people who
+  joined afterwards. Participants rcord has no profile for yet are looked up.
+- **Leaving a call** takes you out of the channel list right away.
+- **Voice channels no longer show unread dots or mention counts**; their text chat cannot be
+  opened in rcord yet, so the markers could never be cleared.
+- **Settings > Voice** is laid out like Discord's: input and output device pickers that list
+  your devices, a mic test that plays your voice back exactly as a call sends it with a live
+  level meter, and input profiles. Voice Isolation (strong noise suppression, automatic gain
+  and sensitivity), Studio (no processing) and Custom, which shows every control: input mode,
+  sensitivity with a threshold bar, noise suppression (None, Standard, Strong) and automatic
+  gain control. Bitrate and other rarely changed settings are under Show Advanced Voice
+  Settings.
+- **Automatic gain control** now works, and **Strong** noise suppression also cuts keyboard
+  clicks and noises between words.
+
 ## 0.1.5 - 2026-11-04
 
 - **Videos play in rcord**: clicking an MP4 or MOV video in chat opens a player over the window

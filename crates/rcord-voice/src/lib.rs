@@ -11,7 +11,7 @@ pub mod resample;
 pub mod rtp;
 pub mod session;
 
-pub use audio::{AudioSettings, DeviceList, Transmit, devices};
+pub use audio::{AudioEvent, AudioSettings, Denoise, DeviceList, MicTest, Transmit, devices};
 pub use protocol::{EncryptionMode, VoiceOp};
 pub use rtp::{IpDiscovery, RtpHeader};
 pub use session::{ConnectionState, VoiceConfig, VoiceEvent, VoiceHandle, connect};

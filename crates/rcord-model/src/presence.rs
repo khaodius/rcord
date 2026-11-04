@@ -176,6 +176,11 @@ impl Presence {
     }
 }
 
+fn lenient_member<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Member>, D::Error> {
+    let raw: Option<serde_json::Value> = Deserialize::deserialize(d)?;
+    Ok(raw.and_then(|v| serde_json::from_value(v).ok()))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoiceState {
     #[serde(default)]
@@ -185,7 +190,9 @@ pub struct VoiceState {
     pub user_id: Snowflake,
     #[serde(default)]
     pub session_id: String,
-    #[serde(default)]
+    /// Dropped rather than failing the whole voice state when it arrives in a shape rcord
+    /// does not read, so a participant never goes missing over a profile field.
+    #[serde(default, deserialize_with = "lenient_member")]
     pub member: Option<Member>,
     #[serde(default)]
     pub deaf: bool,

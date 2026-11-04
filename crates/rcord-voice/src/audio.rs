@@ -43,6 +43,18 @@ pub enum Transmit {
     PushToTalk { release_ms: u32 },
 }
 
+/// How hard the microphone is cleaned up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Denoise {
+    Off,
+    /// RNNoise removes steady background noise; voice detection uses its voice probability.
+    #[default]
+    Standard,
+    /// Standard, plus anything RNNoise is not confident is a voice is turned down, so
+    /// keyboards and clicks between words are cut too.
+    Strong,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioSettings {
     /// Device names as [`devices`] lists them; `None` follows the system default.
@@ -52,7 +64,9 @@ pub struct AudioSettings {
     pub input_gain: f32,
     pub output_gain: f32,
     pub transmit: Transmit,
-    pub noise_suppression: bool,
+    pub noise_suppression: Denoise,
+    /// Brings quiet and loud voices to a steady level.
+    pub automatic_gain: bool,
     pub bitrate_kbps: u32,
 }
 
@@ -64,7 +78,8 @@ impl Default for AudioSettings {
             input_gain: 1.0,
             output_gain: 1.0,
             transmit: Transmit::VoiceActivity { threshold_db: None },
-            noise_suppression: true,
+            noise_suppression: Denoise::Standard,
+            automatic_gain: true,
             bitrate_kbps: 64,
         }
     }
@@ -217,6 +232,53 @@ impl AudioEngine {
         }
         *cur = settings;
         self.shared.settings_changed.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Plays the microphone back through the speakers, processed exactly as a call sends it:
+/// gain, noise suppression, the voice gate and Opus. Dropping it stops the test.
+pub struct MicTest {
+    engine: AudioEngine,
+}
+
+impl std::fmt::Debug for MicTest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MicTest").finish_non_exhaustive()
+    }
+}
+
+impl MicTest {
+    pub fn start(
+        settings: AudioSettings,
+    ) -> std::io::Result<(Self, async_channel::Receiver<AudioEvent>)> {
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (event_tx, event_rx) = async_channel::unbounded();
+        let engine = AudioEngine::start(settings, out_tx, event_tx)?;
+        let sink = engine.sink();
+        std::thread::Builder::new()
+            .name("rcord-mic-test".into())
+            .spawn(move || {
+                let mut sequence = 0u16;
+                while let Some(out) = out_rx.blocking_recv() {
+                    if let Outbound::Opus(opus) = out {
+                        let packet = Inbound {
+                            user_id: 0,
+                            ssrc: 1,
+                            sequence,
+                            opus,
+                        };
+                        if sink.send(packet).is_err() {
+                            break;
+                        }
+                        sequence = sequence.wrapping_add(1);
+                    }
+                }
+            })?;
+        Ok((Self { engine }, event_rx))
+    }
+
+    pub fn update_settings(&self, settings: AudioSettings) {
+        self.engine.update_settings(settings);
     }
 }
 
@@ -491,6 +553,45 @@ impl Gate {
     }
 }
 
+/// Automatic gain control: moves the microphone's speech level toward -20 dBFS, rising
+/// slowly and falling fast, and only learns from frames that contain a voice, so silence is
+/// never pumped up.
+#[derive(Debug)]
+pub struct Agc {
+    gain_db: f32,
+}
+
+impl Default for Agc {
+    fn default() -> Self {
+        Self { gain_db: 0.0 }
+    }
+}
+
+impl Agc {
+    const TARGET_DB: f32 = -20.0;
+    const MAX_GAIN_DB: f32 = 18.0;
+    const MIN_GAIN_DB: f32 = -12.0;
+
+    pub fn gain_db(&self) -> f32 {
+        self.gain_db
+    }
+
+    pub fn process(&mut self, frame: &mut [f32], voice_probability: Option<f32>) {
+        let before = level_db(frame);
+        let voiced = voice_probability.map_or(before > -50.0, |p| p > 0.6);
+        if voiced {
+            let error = Self::TARGET_DB - (before + self.gain_db);
+            let step = if error > 0.0 { 0.15 } else { 1.5 };
+            self.gain_db = (self.gain_db + error.clamp(-step, step))
+                .clamp(Self::MIN_GAIN_DB, Self::MAX_GAIN_DB);
+        }
+        let g = 10f32.powf(self.gain_db / 20.0);
+        for s in frame.iter_mut() {
+            *s = soft_clip(*s * g);
+        }
+    }
+}
+
 pub fn level_db(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return -100.0;
@@ -527,6 +628,8 @@ struct MediaLoop {
     encoder: Option<opus::Encoder>,
     denoise: Option<Box<nnnoiseless::DenoiseState<'static>>>,
     gate: Gate,
+    agc: Agc,
+    strong_gain: f32,
     transmitting: bool,
     silence_left: u8,
     level_frames: u32,
@@ -553,6 +656,8 @@ impl MediaLoop {
             encoder: None,
             denoise: None,
             gate: Gate::default(),
+            agc: Agc::default(),
+            strong_gain: 1.0,
             transmitting: false,
             silence_left: 0,
             level_frames: 0,
@@ -596,10 +701,8 @@ impl MediaLoop {
     fn apply_settings(&mut self) {
         self.settings = self.shared.settings.lock().clone();
         self.encoder = self.make_encoder();
-        self.denoise = self
-            .settings
-            .noise_suppression
-            .then(nnnoiseless::DenoiseState::new);
+        self.denoise =
+            (self.settings.noise_suppression != Denoise::Off).then(nnnoiseless::DenoiseState::new);
     }
 
     fn run(mut self) {
@@ -688,6 +791,17 @@ impl MediaLoop {
                     }
                 }
                 vad = Some(p);
+                if self.settings.noise_suppression == Denoise::Strong {
+                    // Ease toward the target gain so words are not chopped.
+                    let target = ((p - 0.3) / 0.4).clamp(0.05, 1.0);
+                    for s in &mut frame {
+                        self.strong_gain += (target - self.strong_gain) * 0.02;
+                        *s *= self.strong_gain;
+                    }
+                }
+            }
+            if self.settings.automatic_gain {
+                self.agc.process(&mut frame, vad);
             }
             let level = level_db(&frame);
             self.level_frames += 1;
@@ -844,6 +958,31 @@ mod tests {
         assert!(!g.update(-70.0, Some(0.0), vad, false));
         // Loud but not voice, according to RNNoise.
         assert!(!g.update(-20.0, Some(0.1), vad, false));
+    }
+
+    #[test]
+    fn agc_raises_quiet_speech_and_ignores_silence() {
+        let mut agc = Agc::default();
+        let quiet: Vec<f32> = (0..FRAME).map(|n| 0.01 * (n as f32 * 0.05).sin()).collect();
+        for _ in 0..500 {
+            let mut f = quiet.clone();
+            agc.process(&mut f, Some(0.9));
+        }
+        assert!(agc.gain_db() > 15.0, "{}", agc.gain_db());
+        let mut silent = Agc::default();
+        for _ in 0..500 {
+            let mut f = quiet.clone();
+            silent.process(&mut f, Some(0.0));
+        }
+        assert_eq!(silent.gain_db(), 0.0);
+        // Loud speech is brought down quickly.
+        let loud: Vec<f32> = (0..FRAME).map(|n| 0.9 * (n as f32 * 0.05).sin()).collect();
+        let mut down = Agc::default();
+        for _ in 0..10 {
+            let mut f = loud.clone();
+            down.process(&mut f, Some(0.9));
+        }
+        assert!(down.gain_db() < -8.0, "{}", down.gain_db());
     }
 
     #[test]

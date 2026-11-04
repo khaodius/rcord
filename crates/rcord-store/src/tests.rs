@@ -269,3 +269,62 @@ fn voice_server_update_is_parsed_not_cached() {
         Change::None
     );
 }
+
+#[test]
+fn voice_participants_from_launch_are_listed() {
+    let mut store = ready();
+    // A member in a shape rcord cannot read must not drop the participant.
+    apply(
+        &mut store,
+        "READY_SUPPLEMENTAL",
+        json!({
+            "merged_presences": {"friends": [], "guilds": [[]]},
+            "guilds": [{"id": "100", "voice_states": [
+                {"user_id": "2", "channel_id": "203", "session_id": "a"},
+                {"user_id": "3", "channel_id": "203", "session_id": "b", "member": {"roles": 5}}
+            ]}],
+            "merged_members": [[{"user_id": "2", "roles": [], "nick": "Pal"}]]
+        }),
+    );
+    let mut ids: Vec<_> = store.voice_states_in(id(203)).map(|v| v.user_id).collect();
+    ids.sort();
+    assert_eq!(ids, vec![id(2), id(3)]);
+    assert_eq!(store.display_name(Some(id(100)), id(2)), Some("Pal"));
+
+    // GUILD_CREATE carries the guild's voice states too, and replaces what was known.
+    apply(
+        &mut store,
+        "GUILD_CREATE",
+        json!({"id": "100", "name": "Rust Club", "channels": [
+            {"id": "203", "type": 2, "name": "Voice", "position": 0}
+        ], "voice_states": [{"user_id": "4", "channel_id": "203", "session_id": "c"}]}),
+    );
+    let ids: Vec<_> = store.voice_states_in(id(203)).map(|v| v.user_id).collect();
+    assert_eq!(ids, vec![id(4)]);
+
+    // Members asked for by ID fill in names.
+    apply(
+        &mut store,
+        "GUILD_MEMBERS_CHUNK",
+        json!({"guild_id": "100", "members": [{"user": {"id": "4", "username": "late"}, "roles": []}]}),
+    );
+    assert_eq!(store.user(id(4)).map(|u| u.username.as_str()), Some("late"));
+}
+
+#[test]
+fn voice_channels_never_show_unread() {
+    let mut store = ready();
+    apply(
+        &mut store,
+        "CHANNEL_UPDATE",
+        json!({"id": "203", "guild_id": "100", "type": 2, "name": "Voice", "position": 0, "last_message_id": "900"}),
+    );
+    apply(
+        &mut store,
+        "MESSAGE_ACK",
+        json!({"channel_id": "203", "message_id": "800", "version": 2}),
+    );
+    assert!(!store.is_unread(id(203)));
+    assert!(!store.tracks_unread(id(203)));
+    assert!(store.tracks_unread(id(201)));
+}

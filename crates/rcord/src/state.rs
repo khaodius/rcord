@@ -145,6 +145,8 @@ pub struct AppState {
     pub(crate) gateway: Option<rcord_gateway::Handle>,
     /// The call this client is in, if any.
     pub call: Option<crate::voice::Call>,
+    /// Voice participants whose profiles were requested, so each is asked for once.
+    pub(crate) voice_members_requested: HashSet<Snowflake>,
     pump: Option<Task<()>>,
     subscribed: BTreeMap<Snowflake, Snowflake>,
     last_typing_sent: HashMap<Snowflake, u64>,
@@ -208,6 +210,7 @@ impl AppState {
             status: Status::Online,
             gateway: None,
             call: None,
+            voice_members_requested: HashSet::new(),
             pump: None,
             subscribed: BTreeMap::new(),
             last_typing_sent: HashMap::new(),
@@ -449,6 +452,12 @@ impl AppState {
                     self.loading_history.clear();
                     self.set_screen(Screen::Main, cx);
                     self.restore_selection(cx);
+                }
+                if matches!(
+                    change,
+                    Change::Voice(_) | Change::Everything | Change::Guild(_)
+                ) {
+                    self.request_voice_members();
                 }
                 if change != Change::None {
                     cx.emit(StateEvent::Store(change));
