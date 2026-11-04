@@ -117,17 +117,22 @@ impl std::fmt::Debug for Capture {
 }
 
 impl Capture {
-    /// Starts capturing `source` at up to `max_fps` frames a second. On Wayland this blocks
-    /// while the user answers the portal dialog, so call it off the UI thread.
-    pub fn start(source: &SourceId, max_fps: u32) -> Result<Self, CaptureError> {
+    /// Starts capturing `source` at up to `max_fps` frames a second, with the pointer drawn
+    /// in when `cursor` is set and the desktop supports it. On Wayland this blocks while the
+    /// user answers the portal dialog, so call it off the UI thread.
+    pub fn start(source: &SourceId, max_fps: u32, cursor: bool) -> Result<Self, CaptureError> {
         let max_fps = max_fps.clamp(1, 60);
         // Room for one frame, so a slow encoder skips frames instead of falling behind.
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let stop: Box<dyn FnOnce() + Send> = match source {
             #[cfg(target_os = "linux")]
-            SourceId::Portal => Box::new(wayland::start(max_fps, tx)?),
+            SourceId::Portal => Box::new(wayland::start(max_fps, cursor, tx)?),
             #[cfg(any(target_os = "linux", windows))]
-            SourceId::Monitor(id) => Box::new(xcap_backend::start(*id, max_fps, tx)?),
+            SourceId::Monitor(id) => {
+                // Screen capture through xcap leaves the pointer out either way.
+                let _ = cursor;
+                Box::new(xcap_backend::start(*id, max_fps, tx)?)
+            }
             #[allow(unreachable_patterns)]
             _ => return Err(CaptureError::Unsupported),
         };

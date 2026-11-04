@@ -95,6 +95,23 @@ pub enum Overlay {
         preset: crate::golive::StreamPreset,
     },
     Video(crate::ui::video::VideoSource),
+    /// The right-click menu for someone in a voice channel.
+    UserMenu {
+        user: Snowflake,
+        /// The voice channel they are in.
+        channel: Snowflake,
+        at: Point<Pixels>,
+        page: UserMenuPage,
+    },
+}
+
+/// Which part of the voice user menu is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserMenuPage {
+    Main,
+    MoveTo,
+    ConfirmKick,
+    ConfirmBan,
 }
 
 #[derive(Debug, Clone)]
@@ -1212,7 +1229,7 @@ impl AppState {
         self.save_settings(cx);
     }
 
-    fn save_settings(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn save_settings(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.paths.as_ref().map(Paths::settings_file) else {
             return;
         };

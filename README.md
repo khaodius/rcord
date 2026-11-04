@@ -77,8 +77,8 @@
   encryption (DAVE) with the call's privacy code, noise suppression (RNNoise), voice activity
   that adapts to the room or follows a fixed threshold, a jitter buffer per speaker with
   forward error correction for lost packets, and speaking rings in the channel list.
-- **Screen share (Go Live)**: share a screen into your voice channel at 720p or 1080p, 30 or 60
-  FPS, and watch other people's streams above the chat. Video is H.264 (OpenH264) with the
+- **Screen share (Go Live)**: share a screen into your voice channel at up to 1440p or the
+  source resolution, at 15, 30 or 60 FPS, and watch other people's streams above the chat. Video is H.264 (OpenH264) with the
   same end-to-end encryption as voice. On Wayland, capture is native: the desktop's own
   sharing dialog picks a screen or window and frames come from PipeWire, with no XWayland
   involved. X11 and Windows list your screens directly.

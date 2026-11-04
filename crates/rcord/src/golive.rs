@@ -32,40 +32,60 @@ pub enum StreamStatus {
     Reconnecting,
 }
 
-/// Stream quality choices, as in Discord's Go Live dialog.
+/// Stream quality, chosen in the Go Live dialog the way Discord offers it: a resolution and
+/// a frame rate. The dialog starts from the screen share settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StreamPreset {
-    P720F30,
-    P1080F30,
-    P1080F60,
+pub struct StreamPreset {
+    /// Vertical resolution; 0 streams at the source's resolution.
+    pub height: u32,
+    pub fps: u32,
 }
 
 impl StreamPreset {
-    pub const ALL: [Self; 3] = [Self::P720F30, Self::P1080F30, Self::P1080F60];
+    pub const RESOLUTIONS: [(&'static str, u32); 4] = [
+        ("720p", 720),
+        ("1080p", 1080),
+        ("1440p", 1440),
+        ("Source", 0),
+    ];
+    pub const FRAME_RATES: [u32; 3] = [15, 30, 60];
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::P720F30 => "720p · 30 FPS",
-            Self::P1080F30 => "1080p · 30 FPS",
-            Self::P1080F60 => "1080p · 60 FPS",
-        }
+    pub fn from_settings(s: &rcord_settings::Stream) -> Self {
+        let height = Self::RESOLUTIONS
+            .iter()
+            .map(|r| r.1)
+            .find(|h| *h == s.resolution)
+            .unwrap_or(720);
+        let fps = Self::FRAME_RATES
+            .into_iter()
+            .find(|f| *f == s.fps)
+            .unwrap_or(30);
+        Self { height, fps }
+    }
+
+    pub fn label(self) -> String {
+        let res = match self.height {
+            0 => "Source".to_owned(),
+            h => format!("{h}p"),
+        };
+        format!("{res} · {} FPS", self.fps)
     }
 
     pub fn quality(self) -> VideoQuality {
-        match self {
-            Self::P720F30 => VideoQuality::P720_30,
-            Self::P1080F30 => VideoQuality {
-                max_width: 1920,
-                max_height: 1080,
-                fps: 30,
-                bitrate_kbps: 4500,
-            },
-            Self::P1080F60 => VideoQuality {
-                max_width: 1920,
-                max_height: 1080,
-                fps: 60,
-                bitrate_kbps: 6000,
-            },
+        // "Source" still caps at 4K, which is as large as Discord streams.
+        let (max_width, max_height) = match self.height {
+            0 => (3840, 2160),
+            h => (h * 16 / 9, h),
+        };
+        // Bits for each pixel and frame, tuned for screen content: about 2.5 Mbps at 720p30,
+        // 5 Mbps at 1080p30, and capped at 8 Mbps.
+        let pixels = u64::from(max_width) * u64::from(max_height) * u64::from(self.fps);
+        let bitrate_kbps = (pixels * 9 / 100_000).clamp(1000, 8000) as u32;
+        VideoQuality {
+            max_width,
+            max_height,
+            fps: self.fps,
+            bitrate_kbps,
         }
     }
 }
@@ -135,8 +155,14 @@ impl AppState {
             return;
         };
         self.stop_go_live(cx);
-        let fps = preset.quality().fps;
-        let started = cx.background_spawn(async move { Capture::start(&source, fps) });
+        let fps = preset.fps;
+        let cursor = self.settings.stream.capture_cursor;
+        // The dialog's choice becomes the default for the next stream.
+        self.update_settings(cx, |s| {
+            s.stream.resolution = preset.height;
+            s.stream.fps = preset.fps;
+        });
+        let started = cx.background_spawn(async move { Capture::start(&source, fps, cursor) });
         cx.spawn(async move |this, cx| {
             let capture = started.await;
             let _ = this.update(cx, |state, cx| {
@@ -256,7 +282,7 @@ impl AppState {
             Some(crate::state::Overlay::GoLive {
                 sources,
                 selected: 0,
-                preset: StreamPreset::P720F30,
+                preset: StreamPreset::from_settings(&self.settings.stream),
             }),
             cx,
         );

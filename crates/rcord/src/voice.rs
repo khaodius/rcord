@@ -76,6 +76,17 @@ impl Call {
 
 /// The audio settings the media loop needs, from the user's settings and the channel's
 /// bitrate.
+/// Sets the saved volume and local mute of everyone who has one.
+fn apply_user_volumes(settings: &Settings, handle: &rcord_voice::VoiceHandle) {
+    let v = &settings.voice;
+    let ids = v.user_volumes.keys().chain(v.muted_users.iter());
+    for id in ids {
+        if let Ok(user) = id.parse::<u64>() {
+            handle.set_user_volume(user, v.user_volume(id));
+        }
+    }
+}
+
 pub fn audio_settings(settings: &Settings, channel_bitrate: Option<u32>) -> AudioSettings {
     let v = &settings.voice;
     let cap = v.max_bitrate_kbps.max(8);
@@ -239,6 +250,89 @@ impl AppState {
     }
 
     /// Passes changed voice settings to a running call.
+    /// Sets how loud `user` plays for you, 0 to 2, and saves it.
+    pub fn set_user_volume(&mut self, user: Snowflake, volume: f32, cx: &mut Context<Self>) {
+        let id = user.to_string();
+        let volume = volume.clamp(0.0, 2.0);
+        let v = &mut self.settings.voice;
+        if (volume - 1.0).abs() > 0.005 {
+            v.user_volumes.insert(id, volume);
+        } else {
+            v.user_volumes.remove(&id);
+        }
+        self.user_audio_changed(user, cx);
+    }
+
+    /// Mutes or unmutes `user` for you alone, and saves it.
+    pub fn set_local_mute(&mut self, user: Snowflake, muted: bool, cx: &mut Context<Self>) {
+        let id = user.to_string();
+        let list = &mut self.settings.voice.muted_users;
+        list.retain(|u| *u != id);
+        if muted {
+            list.push(id);
+            list.sort();
+        }
+        self.user_audio_changed(user, cx);
+    }
+
+    /// Applies one person's volume to the call and saves it. This skips the full settings
+    /// update, since a volume slider sends many changes a second.
+    fn user_audio_changed(&mut self, user: Snowflake, cx: &mut Context<Self>) {
+        if let Some(h) = self.call.as_ref().and_then(|c| c.handle.as_ref()) {
+            h.set_user_volume(
+                user.get(),
+                self.settings.voice.user_volume(&user.to_string()),
+            );
+        }
+        self.save_settings(cx);
+        cx.notify();
+    }
+
+    /// Server mutes, server deafens, moves or disconnects `user`, as a moderator.
+    pub fn moderate_voice(
+        &mut self,
+        guild: Snowflake,
+        user: Snowflake,
+        change: rcord_rest::routes::MemberVoiceChange,
+        cx: &mut Context<Self>,
+    ) {
+        self.member_request(cx, "update their voice", move |rest| async move {
+            rest.modify_member_voice(guild, user, change).await
+        });
+    }
+
+    pub fn kick_member(&mut self, guild: Snowflake, user: Snowflake, cx: &mut Context<Self>) {
+        self.member_request(cx, "kick them", move |rest| async move {
+            rest.kick_member(guild, user).await
+        });
+    }
+
+    pub fn ban_member(&mut self, guild: Snowflake, user: Snowflake, cx: &mut Context<Self>) {
+        self.member_request(cx, "ban them", move |rest| async move {
+            rest.ban_member(guild, user).await
+        });
+    }
+
+    /// Runs a moderation request and reports a failure, such as a missing permission or a
+    /// member whose role is above yours.
+    fn member_request<F, Fut>(&mut self, cx: &mut Context<Self>, what: &'static str, f: F)
+    where
+        F: FnOnce(rcord_rest::Client) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = rcord_rest::Result<()>> + Send + 'static,
+    {
+        let Some(rest) = cx.global::<Net>().rest() else {
+            return;
+        };
+        let task = cx.global::<Net>().run(async move { f(rest).await });
+        cx.spawn(async move |this, cx| {
+            if let Some(Err(e)) = task.await {
+                this.update(cx, |s, cx| s.toast(format!("Could not {what}: {e}"), cx))
+                    .ok();
+            }
+        })
+        .detach();
+    }
+
     pub fn voice_settings_changed(&mut self) {
         let Some(call) = &self.call else {
             return;
@@ -248,6 +342,7 @@ impl AppState {
         };
         let bitrate = self.store.channel(call.channel).and_then(|c| c.bitrate);
         h.update_audio(audio_settings(&self.settings, bitrate));
+        apply_user_volumes(&self.settings, h);
     }
 
     /// Looks at gateway updates that matter to the call before the cache applies them.
@@ -350,6 +445,7 @@ impl AppState {
             }
         };
         let channel = call.channel;
+        apply_user_volumes(&self.settings, &handle);
         call.handle = Some(handle);
         call.status = CallStatus::Connecting;
         call._events = Some(cx.spawn(async move |this, cx| {
