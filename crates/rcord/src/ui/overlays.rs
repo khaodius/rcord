@@ -1126,6 +1126,23 @@ impl Render for OverlayLayer {
             Some(Overlay::Menu { at, items }) => {
                 root = scrim_close(root, self.state.clone()).child(self.menu(at, items, cx));
             }
+            Some(Overlay::UserMenu {
+                user,
+                channel,
+                at,
+                page,
+            }) => {
+                let menu = crate::ui::user_menu::user_menu(
+                    &self.state,
+                    &self.chat,
+                    user,
+                    channel,
+                    at,
+                    page,
+                    cx,
+                );
+                root = scrim_close(root, self.state.clone()).child(menu);
+            }
             Some(Overlay::Profile { user, guild, at }) => {
                 let card = profile_card(&self.state, user, guild, cx);
                 root = scrim_close(root, self.state.clone()).child(

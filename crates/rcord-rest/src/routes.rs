@@ -256,6 +256,55 @@ impl Client {
         .await
     }
 
+    /// Changes a member's voice state as a moderator: server mute, server deafen, or the
+    /// voice channel they are in (`Some(None)` disconnects them).
+    pub async fn modify_member_voice(
+        &self,
+        guild: Snowflake,
+        user: Snowflake,
+        change: MemberVoiceChange,
+    ) -> Result<()> {
+        let mut body = serde_json::Map::new();
+        if let Some(mute) = change.mute {
+            body.insert("mute".into(), mute.into());
+        }
+        if let Some(deaf) = change.deaf {
+            body.insert("deaf".into(), deaf.into());
+        }
+        if let Some(channel) = change.channel {
+            body.insert(
+                "channel_id".into(),
+                channel.map_or(serde_json::Value::Null, |c| c.to_string().into()),
+            );
+        }
+        self.send_empty(
+            Method::PATCH,
+            &format!("/guilds/{guild}/members/{user}"),
+            Some(&body),
+        )
+        .await
+    }
+
+    /// Removes `user` from the server. They can rejoin with an invite.
+    pub async fn kick_member(&self, guild: Snowflake, user: Snowflake) -> Result<()> {
+        self.send_empty::<()>(
+            Method::DELETE,
+            &format!("/guilds/{guild}/members/{user}"),
+            None,
+        )
+        .await
+    }
+
+    /// Bans `user` from the server without deleting their messages.
+    pub async fn ban_member(&self, guild: Snowflake, user: Snowflake) -> Result<()> {
+        self.send_empty(
+            Method::PUT,
+            &format!("/guilds/{guild}/bans/{user}"),
+            Some(&serde_json::json!({ "delete_message_seconds": 0 })),
+        )
+        .await
+    }
+
     /// The full profile, with badges, bio, connections and mutual servers.
     pub async fn user_profile(
         &self,
@@ -316,4 +365,13 @@ mod tests {
             r#"{"content":"hi","nonce":"1","tts":false,"flags":0}"#
         );
     }
+}
+
+/// A moderator's change to someone's voice state; fields left `None` stay as they are.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MemberVoiceChange {
+    pub mute: Option<bool>,
+    pub deaf: Option<bool>,
+    /// `Some(None)` disconnects them from voice.
+    pub channel: Option<Option<Snowflake>>,
 }

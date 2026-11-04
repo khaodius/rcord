@@ -8,7 +8,9 @@ use gpui::{
 use rcord_model::{Channel, ChannelKind, Snowflake, Status};
 use rcord_store::Change;
 
-use crate::state::{AppState, Connection, MenuItem, Overlay, SettingsPage, StateEvent};
+use crate::state::{
+    AppState, Connection, MenuItem, Overlay, SettingsPage, StateEvent, UserMenuPage,
+};
 use crate::theme::{Theme, theme};
 use crate::ui::icons::{Icon, icon};
 use crate::ui::{
@@ -191,6 +193,7 @@ impl ChannelSidebar {
         for (user, name, url, muted, deafened, live) in voice {
             let state = self.state.clone();
             let watch_state = self.state.clone();
+            let menu_state = self.state.clone();
             let watched = watching_key == Some(user);
             let speaking = talking.contains(&user);
             wrapper = wrapper.child(
@@ -273,6 +276,20 @@ impl ChannelSidebar {
                         state.update(cx, |s, cx| {
                             let g = s.guild;
                             s.open_profile(user, g, at, cx)
+                        })
+                    })
+                    .on_mouse_up(MouseButton::Right, move |e, _, cx| {
+                        let at = e.position;
+                        menu_state.update(cx, |s, cx| {
+                            s.set_overlay(
+                                Some(Overlay::UserMenu {
+                                    user,
+                                    channel: id,
+                                    at,
+                                    page: UserMenuPage::Main,
+                                }),
+                                cx,
+                            )
                         })
                     }),
             );

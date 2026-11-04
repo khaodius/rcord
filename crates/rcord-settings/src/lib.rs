@@ -397,6 +397,20 @@ pub struct Voice {
     pub attenuation: f32,
     /// Opus bitrate cap in kbit/s; the channel's bitrate applies when lower.
     pub max_bitrate_kbps: u32,
+    /// Volume for each person, by user ID, 0 to 2; people not listed play at 1.
+    pub user_volumes: BTreeMap<String, f32>,
+    /// People muted for you alone, by user ID.
+    pub muted_users: Vec<String>,
+}
+
+impl Voice {
+    /// How loud `user` plays for you, counting a local mute.
+    pub fn user_volume(&self, user: &str) -> f32 {
+        if self.muted_users.iter().any(|u| u == user) {
+            return 0.0;
+        }
+        self.user_volumes.get(user).copied().unwrap_or(1.0)
+    }
 }
 
 impl Default for Voice {
@@ -417,6 +431,8 @@ impl Default for Voice {
             automatic_gain: true,
             attenuation: 0.0,
             max_bitrate_kbps: 128,
+            user_volumes: BTreeMap::new(),
+            muted_users: Vec::new(),
         }
     }
 }
@@ -674,6 +690,13 @@ impl Settings {
         v.attenuation = finite_or(v.attenuation, 0.0).clamp(0.0, 1.0);
         v.max_bitrate_kbps = v.max_bitrate_kbps.clamp(8, 512);
         v.push_to_talk_release_ms = v.push_to_talk_release_ms.min(2_000);
+        for vol in v.user_volumes.values_mut() {
+            *vol = finite_or(*vol, 1.0).clamp(0.0, 2.0);
+        }
+        // Full volume is the default, so it needs no entry.
+        v.user_volumes.retain(|_, vol| (*vol - 1.0).abs() > 0.005);
+        v.muted_users.sort();
+        v.muted_users.dedup();
         self.stream.fps = match self.stream.fps {
             0..=15 => 15,
             16..=30 => 30,
@@ -768,6 +791,23 @@ impl Paths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_volumes_count_local_mutes_and_drop_defaults() {
+        let mut s = Settings::default();
+        s.voice.user_volumes.insert("1".into(), 1.5);
+        s.voice.user_volumes.insert("2".into(), 1.0);
+        s.voice.user_volumes.insert("3".into(), 9.0);
+        s.voice.muted_users = vec!["1".into(), "1".into()];
+        s.sanitize();
+        assert_eq!(s.voice.user_volume("1"), 0.0);
+        assert!(!s.voice.user_volumes.contains_key("2"));
+        assert_eq!(s.voice.user_volume("3"), 2.0);
+        assert_eq!(s.voice.user_volume("4"), 1.0);
+        assert_eq!(s.voice.muted_users, ["1"]);
+        let back = Settings::from_toml(&s.to_toml().unwrap()).unwrap();
+        assert_eq!(back.voice.user_volumes, s.voice.user_volumes);
+    }
 
     #[test]
     fn old_image_default_moves_down() {
