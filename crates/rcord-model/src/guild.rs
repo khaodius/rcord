@@ -19,6 +19,9 @@ pub struct Guild {
     pub description: Option<String>,
     #[serde(default)]
     pub owner_id: Option<Snowflake>,
+    /// 0 notifies for all messages, 1 for mentions only, unless you choose otherwise.
+    #[serde(default)]
+    pub default_message_notifications: u8,
     #[serde(default)]
     pub features: Vec<String>,
     #[serde(default)]

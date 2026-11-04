@@ -103,6 +103,16 @@ pub enum Overlay {
         streamer: Snowflake,
         at: Point<Pixels>,
     },
+    ChannelMenu {
+        channel: Snowflake,
+        at: Point<Pixels>,
+        page: ChannelMenuPage,
+    },
+    GuildMenu {
+        guild: Snowflake,
+        at: Point<Pixels>,
+        page: GuildMenuPage,
+    },
     /// The right-click menu for someone in a voice channel.
     UserMenu {
         user: Snowflake,
@@ -111,6 +121,30 @@ pub enum Overlay {
         at: Point<Pixels>,
         page: UserMenuPage,
     },
+}
+
+/// Which part of a channel's right-click menu is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelMenuPage {
+    Main,
+    Mute,
+    Notifications,
+    Rename,
+    CreateText,
+    ConfirmDelete,
+}
+
+/// Which part of a server's right-click menu is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuildMenuPage {
+    Main,
+    Mute,
+    Notifications,
+    CreateText,
+    CreateCategory,
+    MoveTo,
+    CopyInfo,
+    ConfirmLeave,
 }
 
 /// Which part of the voice user menu is showing.

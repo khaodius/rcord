@@ -6,9 +6,9 @@ pub mod events;
 use std::collections::VecDeque;
 
 use rcord_model::{
-    Channel, ChannelKind, Emoji, Guild, Member, Message, Permissions, Presence, Reaction,
-    ReactionCounts, Relationship, RelationshipKind, Snowflake, Status, User, VoiceState,
-    base_permissions, channel_permissions,
+    Channel, ChannelKind, Emoji, Guild, Member, Message, NotifyLevel, Permissions, Presence,
+    Reaction, ReactionCounts, Relationship, RelationshipKind, Snowflake, Status, User,
+    UserGuildSettings, VoiceState, base_permissions, channel_permissions,
 };
 use rustc_hash::FxHashMap;
 
@@ -108,6 +108,8 @@ pub struct Store {
     /// The list shown for each guild: the one Discord last sent a full SYNC of, which answers
     /// the subscription for the channel on screen.
     current_member_list: FxHashMap<Snowflake, String>,
+    /// Your notification settings by server; direct messages are under the zero ID.
+    guild_settings: FxHashMap<u64, UserGuildSettings>,
     message_cap: usize,
 }
 
@@ -137,6 +139,7 @@ impl Store {
             voice: FxHashMap::default(),
             member_lists: FxHashMap::default(),
             current_member_list: FxHashMap::default(),
+            guild_settings: FxHashMap::default(),
             message_cap: messages_per_channel.max(50),
         }
     }
@@ -304,6 +307,19 @@ impl Store {
         channel_permissions(base, guild_id, source, me, roles)
     }
 
+    /// Your permissions across `guild`, before any channel's overwrites.
+    pub fn guild_permissions(&self, guild: Snowflake) -> Permissions {
+        let (Some(entry), Some(me)) = (self.guilds.get(&guild), self.me_id()) else {
+            return Permissions::empty();
+        };
+        let roles = entry
+            .members
+            .get(&me)
+            .map(|m| m.roles.as_slice())
+            .unwrap_or_default();
+        base_permissions(&entry.guild, me, roles)
+    }
+
     pub fn can_view(&self, channel: Snowflake) -> bool {
         self.permissions(channel)
             .contains(Permissions::VIEW_CHANNEL)
@@ -363,12 +379,69 @@ impl Store {
         self.read_states.get(&channel).copied().unwrap_or_default()
     }
 
-    /// Whether `channel` counts toward unread markers and mention badges. Voice channels do
-    /// not: their text chat cannot be opened here, so a marker could never be cleared.
+    /// Whether `channel` counts toward unread markers. Voice channels do not: their text
+    /// chat cannot be opened here, so a marker could never be cleared. Muted channels, and
+    /// the channels of muted servers, do not either, as in Discord; their mentions still count.
     pub fn tracks_unread(&self, channel: Snowflake) -> bool {
         self.channels
             .get(&channel)
             .is_some_and(|c| !c.kind.is_voice())
+            && !self.is_channel_muted(channel)
+            && !self
+                .channels
+                .get(&channel)
+                .and_then(|c| c.guild_id)
+                .is_some_and(|g| self.is_guild_muted(g))
+    }
+
+    pub fn guild_settings(&self, guild: Option<Snowflake>) -> Option<&UserGuildSettings> {
+        self.guild_settings.get(&guild.map_or(0, Snowflake::get))
+    }
+
+    pub fn is_guild_muted(&self, guild: Snowflake) -> bool {
+        self.guild_settings(Some(guild))
+            .is_some_and(|s| s.is_muted(time::OffsetDateTime::now_utc()))
+    }
+
+    /// The channel itself is muted, or the category it sits in.
+    pub fn is_channel_muted(&self, channel: Snowflake) -> bool {
+        let Some(c) = self.channels.get(&channel) else {
+            return false;
+        };
+        let Some(settings) = self.guild_settings(c.guild_id) else {
+            return false;
+        };
+        let now = time::OffsetDateTime::now_utc();
+        settings.is_channel_muted(channel, now)
+            || c.parent_id
+                .is_some_and(|p| settings.is_channel_muted(p, now))
+    }
+
+    /// The level a channel is set to, before falling back to its server.
+    pub fn channel_notify_level(&self, channel: Snowflake) -> NotifyLevel {
+        let guild = self.channels.get(&channel).and_then(|c| c.guild_id);
+        self.guild_settings(guild)
+            .and_then(|s| s.channel(channel))
+            .map_or(NotifyLevel::Inherit, |o| o.message_notifications)
+    }
+
+    /// The level a server gives, with its default filled in.
+    pub fn guild_notify_level(&self, guild: Snowflake) -> NotifyLevel {
+        match self
+            .guild_settings(Some(guild))
+            .map_or(NotifyLevel::Inherit, |s| s.message_notifications)
+        {
+            NotifyLevel::Inherit => match self.guilds.get(&guild) {
+                Some(g) if g.guild.default_message_notifications == 0 => NotifyLevel::All,
+                _ => NotifyLevel::Mentions,
+            },
+            level => level,
+        }
+    }
+
+    pub fn hides_muted_channels(&self, guild: Snowflake) -> bool {
+        self.guild_settings(Some(guild))
+            .is_some_and(|s| s.hide_muted_channels)
     }
 
     pub fn is_unread(&self, channel: Snowflake) -> bool {
@@ -392,10 +465,12 @@ impl Store {
         let mut unread = false;
         let mut mentions = 0;
         for id in &entry.channel_ids {
+            if self.channels.get(id).is_some_and(|c| !c.kind.is_voice()) {
+                mentions += self.read_state(*id).mentions;
+            }
             if !self.tracks_unread(*id) {
                 continue;
             }
-            mentions += self.read_state(*id).mentions;
             if !unread && self.is_unread(*id) && self.can_view(*id) {
                 unread = true;
             }
@@ -811,6 +886,10 @@ impl Store {
                     }
                     self.relationships.insert(r.id, r);
                 }
+                for g in ready.user_guild_settings.into_vec() {
+                    self.guild_settings
+                        .insert(g.guild_id.map_or(0, Snowflake::get), g);
+                }
                 for e in ready.read_state.entries() {
                     if e.read_state_type == 0 {
                         self.read_states.insert(
@@ -1094,6 +1173,12 @@ impl Store {
                     self.insert_channel(t, Some(guild_id));
                 }
                 Change::Channels(Some(guild_id))
+            }
+            Update::GuildSettings(settings) => {
+                let guild = settings.guild_id;
+                self.guild_settings
+                    .insert(guild.map_or(0, Snowflake::get), *settings);
+                Change::Channels(guild)
             }
             Update::PresenceUpdate(presence) => match self.insert_presence(*presence) {
                 Some(id) => Change::Presence(id),

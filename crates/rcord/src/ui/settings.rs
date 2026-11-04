@@ -556,12 +556,14 @@ impl SettingsView {
             );
         }
         swatches = swatches.child(div().w(px(110.)).child(self.accent_input.clone()));
+        let accent_sliders = self.accent_sliders(accent, t, cx);
 
         let mut out = vec![
             heading("Theme", t),
             themes.into_any_element(),
             heading("Accent color", t),
             swatches.into_any_element(),
+            accent_sliders,
             heading("Preview", t),
             message_preview(s, t),
             heading("Scaling", t),
@@ -1903,6 +1905,140 @@ impl SettingsView {
             t,
             cx,
         )
+    }
+
+    /// Any accent color: a hue bar across the rainbow and a shade bar from dark to light,
+    /// both starting from the color in use. Dragging applies it live.
+    fn accent_sliders(&self, accent: u32, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let current = gpui::Hsla::from(gpui::rgb(accent));
+        let sat = current.s.max(0.35);
+        let to_rgb = |h: f32, s: f32, l: f32| -> u32 {
+            let c = gpui::Rgba::from(gpui::hsla(h.rem_euclid(1.0), s, l, 1.0));
+            let b = |v: f32| (v.clamp(0., 1.) * 255.).round() as u32;
+            (b(c.r) << 16) | (b(c.g) << 8) | b(c.b)
+        };
+        let bar = |id: &'static str,
+                   colors: Vec<u32>,
+                   fraction: f32,
+                   pick: Rc<dyn Fn(f32) -> u32>,
+                   cx: &mut Context<Self>| {
+            let bounds: Rc<Cell<Option<Bounds<Pixels>>>> = Rc::default();
+            let at = {
+                let bounds = bounds.clone();
+                move |x: Pixels| -> Option<f32> {
+                    let b = bounds.get()?;
+                    Some((f32::from(x - b.origin.x) / f32::from(b.size.width)).clamp(0., 1.))
+                }
+            };
+            let at_move = at.clone();
+            let (pick_down, pick_move) = (pick.clone(), pick);
+            let input = self.accent_input.clone();
+            let input_move = input.clone();
+            let mut strip = div()
+                .w_full()
+                .h(px(12.))
+                .rounded_full()
+                .overflow_hidden()
+                .flex();
+            for c in colors {
+                strip = strip.child(div().flex_1().h_full().bg(gpui::rgb(c)));
+            }
+            div()
+                .id(id)
+                .relative()
+                .w(px(320.))
+                .h(px(24.))
+                .flex()
+                .items_center()
+                .cursor_pointer()
+                .child(strip)
+                .child(
+                    div()
+                        .absolute()
+                        .left(gpui::relative(fraction))
+                        .ml(px(-8.))
+                        .size(px(16.))
+                        .rounded_full()
+                        .border_2()
+                        .border_color(gpui::white())
+                        .shadow_sm(),
+                )
+                .child(
+                    canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
+                        .absolute()
+                        .inset_0(),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, e: &gpui::MouseDownEvent, _, cx| {
+                        if let Some(f) = at(e.position.x) {
+                            let c = pick_down(f);
+                            input.update(cx, |i, cx| i.set_text(format!("#{c:06X}"), cx));
+                            this.update(cx, |s| s.appearance.accent = c);
+                        }
+                    }),
+                )
+                .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {
+                    if e.pressed_button == Some(MouseButton::Left)
+                        && let Some(f) = at_move(e.position.x)
+                    {
+                        let c = pick_move(f);
+                        if c != this.state.read(cx).settings.appearance.accent {
+                            input_move.update(cx, |i, cx| i.set_text(format!("#{c:06X}"), cx));
+                            this.update(cx, |s| s.appearance.accent = c);
+                        }
+                    }
+                }))
+                .into_any_element()
+        };
+        let (h, l) = (current.h, current.l.clamp(0.2, 0.8));
+        let hues: Vec<u32> = (0..36).map(|i| to_rgb(i as f32 / 36., sat, l)).collect();
+        let shades: Vec<u32> = (0..24)
+            .map(|i| to_rgb(h, sat, 0.2 + 0.6 * i as f32 / 23.))
+            .collect();
+        let hue_bar = bar(
+            "accent-hue",
+            hues,
+            h,
+            Rc::new(move |f| to_rgb(f, sat, l)),
+            cx,
+        );
+        let shade_bar = bar(
+            "accent-shade",
+            shades,
+            (l - 0.2) / 0.6,
+            Rc::new(move |f| to_rgb(h, sat, 0.2 + 0.6 * f)),
+            cx,
+        );
+        let label = |text: &'static str| {
+            div()
+                .w(px(56.))
+                .text_sm()
+                .text_color(t.text_muted)
+                .child(text)
+        };
+        div()
+            .mt(px(12.))
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(label("Hue"))
+                    .child(hue_bar),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(label("Shade"))
+                    .child(shade_bar),
+            )
+            .into_any_element()
     }
 
     fn slider_inner(

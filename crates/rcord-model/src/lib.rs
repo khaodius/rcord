@@ -5,6 +5,7 @@ pub mod cdn;
 mod channel;
 mod emoji;
 mod guild;
+mod guild_settings;
 mod message;
 mod permissions;
 mod presence;
@@ -16,6 +17,9 @@ pub use emoji::{
     Emoji, Reaction, ReactionCounts, Sticker, StickerFormat, StickerItem, StickerPack,
 };
 pub use guild::{Guild, Member, Role, RoleColors};
+pub use guild_settings::{
+    ChannelOverride, MuteConfig, NotifyLevel, UserGuildSettings, mute_active,
+};
 pub use message::{
     Attachment, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, Message,
     MessageKind, MessageReference, Nonce,

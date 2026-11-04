@@ -466,7 +466,7 @@ pub fn user_menu(
 
 /// One row. `check` draws a checkbox on the right; rows with one stay open when clicked, as
 /// in Discord.
-fn item(
+pub(crate) fn item(
     n: usize,
     label: &str,
     danger: bool,
@@ -519,7 +519,7 @@ fn item(
         .into_any_element()
 }
 
-fn separator(t: &Theme) -> AnyElement {
+pub(crate) fn separator(t: &Theme) -> AnyElement {
     div()
         .mx(px(4.))
         .my(px(4.))
@@ -528,7 +528,7 @@ fn separator(t: &Theme) -> AnyElement {
         .into_any_element()
 }
 
-fn note(text: &str, t: &Theme) -> AnyElement {
+pub(crate) fn note(text: &str, t: &Theme) -> AnyElement {
     div()
         .px(px(8.))
         .py(px(6.))

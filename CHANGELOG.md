@@ -3,6 +3,42 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
+## 0.1.10 - 2026-11-04
+
+- **Right-click a channel** for the menu Discord has. The menu offers:
+  - Mark As Read and Invite to Channel, which copies a seven-day invite link;
+  - Copy Link;
+  - Mute Channel, for 15 minutes up to until you turn it back on;
+  - Notification Settings: server default, all messages, only @mentions or nothing.
+
+  With Manage Channels you also get Edit Channel (rename), Duplicate Channel, Create Text
+  Channel and Delete Channel, which asks first. Categories have the same menu.
+- **Right-click a server** for its menu, which offers:
+  - Mark As Read and Invite to Server;
+  - Mute Server and Notification Settings;
+  - Hide Muted Channels;
+  - Create Channel and Create Category, with Manage Channels;
+  - Move to…, to the top, the bottom or one step;
+  - Copy Server Info: name, ID and icon link;
+  - Leave Server, which asks first.
+
+  Name a new channel right in the menu, and press Enter to create it.
+- **Mutes and notification settings from Discord are followed**. Muted channels are dimmed
+  and never show as unread, but their @mentions still count, as in Discord. Muting a category
+  mutes the channels in it. Hide Muted Channels hides them unless one is open or mentions you.
+- **Crown on the server owner** in the member list.
+- **Home button** shows the friends icon by default. Pick the logo, your avatar or a picture
+  in Settings > Appearance.
+- **Title bar**: rcord's mark at the top left takes your accent color.
+- **Any accent color**: Hue and Shade sliders under the accent swatches change it live.
+- **GIF links** (Klipy, Tenor and others) show as the GIF alone. Before, the link showed above
+  it, and in compact mode it wrapped one letter per line.
+- **Message rows span the chat**, so hover and mention highlights reach the right edge and
+  code blocks use the full width.
+- The README screenshot shows the Midnight theme.
+- AGENTS.md describes the layout, checks, CI and release process for anyone working on the
+  code.
+
 ## 0.1.9 - 2026-11-04
 
 - **Streams play at full quality.** rcord now asks Discord for the streamer's full-quality

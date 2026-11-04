@@ -388,3 +388,82 @@ pub struct MemberVoiceChange {
     /// `Some(None)` disconnects them from voice.
     pub channel: Option<Option<Snowflake>>,
 }
+
+#[derive(Debug, Deserialize)]
+struct Invite {
+    code: String,
+}
+
+/// A new channel, or a change to one. Fields left `None` are not sent.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ChannelSpec {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Snowflake>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nsfw: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_per_user: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitrate: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_overwrites: Option<serde_json::Value>,
+}
+
+impl Client {
+    /// Changes your notification settings for a server. `changes` is the partial settings
+    /// object Discord's client sends, such as `{"muted": true}` or
+    /// `{"channel_overrides": {"123": {"message_notifications": 2}}}`.
+    pub async fn update_guild_settings(
+        &self,
+        guild: Snowflake,
+        changes: &serde_json::Value,
+    ) -> Result<()> {
+        self.send_empty(
+            Method::PATCH,
+            &format!("/users/@me/guilds/{guild}/settings"),
+            Some(changes),
+        )
+        .await
+    }
+
+    /// Makes an invite to `channel` that lasts seven days, and returns its code.
+    pub async fn create_invite(&self, channel: Snowflake) -> Result<String> {
+        let invite: Invite = self
+            .post(
+                &format!("/channels/{channel}/invites"),
+                &serde_json::json!({ "max_age": 604_800, "max_uses": 0, "temporary": false }),
+            )
+            .await?;
+        Ok(invite.code)
+    }
+
+    pub async fn create_channel(&self, guild: Snowflake, spec: &ChannelSpec) -> Result<Channel> {
+        self.post(&format!("/guilds/{guild}/channels"), spec).await
+    }
+
+    pub async fn edit_channel(&self, channel: Snowflake, spec: &ChannelSpec) -> Result<Channel> {
+        self.patch(&format!("/channels/{channel}"), spec).await
+    }
+
+    pub async fn delete_channel(&self, channel: Snowflake) -> Result<()> {
+        self.send_empty::<()>(Method::DELETE, &format!("/channels/{channel}"), None)
+            .await
+    }
+
+    pub async fn leave_guild(&self, guild: Snowflake) -> Result<()> {
+        self.send_empty(
+            Method::DELETE,
+            &format!("/users/@me/guilds/{guild}"),
+            Some(&serde_json::json!({ "lurking": false })),
+        )
+        .await
+    }
+}

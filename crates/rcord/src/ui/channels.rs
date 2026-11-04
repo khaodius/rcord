@@ -2,14 +2,15 @@
 //! panel at the bottom.
 
 use gpui::{
-    AnyElement, ClipboardItem, Context, Entity, FontWeight, IntoElement, MouseButton, Render,
-    ScrollHandle, Subscription, Window, div, prelude::*, px,
+    AnyElement, Context, Entity, FontWeight, IntoElement, MouseButton, Render, ScrollHandle,
+    Subscription, Window, div, prelude::*, px,
 };
 use rcord_model::{Channel, ChannelKind, Snowflake, Status};
 use rcord_store::Change;
 
 use crate::state::{
-    AppState, Connection, MenuItem, Overlay, SettingsPage, StateEvent, UserMenuPage,
+    AppState, ChannelMenuPage, Connection, MenuItem, Overlay, SettingsPage, StateEvent,
+    UserMenuPage,
 };
 use crate::theme::{Theme, theme};
 use crate::ui::icons::{Icon, icon};
@@ -70,7 +71,8 @@ impl ChannelSidebar {
         let c = s.store.channel(id)?;
         let selected = s.channel == Some(id);
         let unread = s.store.is_unread(id);
-        let mentions = if s.store.tracks_unread(id) {
+        let muted = s.store.is_channel_muted(id);
+        let mentions = if !c.kind.is_voice() {
             s.store.read_state(id).mentions
         } else {
             0
@@ -81,7 +83,6 @@ impl ChannelSidebar {
         let which = Self::channel_icon(c, private);
         let name = c.name.clone().unwrap_or_default();
         let is_voice = c.kind.is_voice();
-        let dev = s.settings.advanced.developer_mode;
         let voice: Vec<(Snowflake, String, String, bool, bool, bool)> = if is_voice {
             s.store
                 .voice_states_in(id)
@@ -128,6 +129,7 @@ impl ChannelSidebar {
                 t.text_faint
             })
             .when(selected, |el| el.bg(t.selected))
+            .when(muted && !selected, |el| el.opacity(0.45))
             .when(!selected, |el| {
                 el.hover(|s| s.bg(t.hover).text_color(t.text))
             })
@@ -148,25 +150,15 @@ impl ChannelSidebar {
             .on_click(move |_, _, cx| state.update(cx, |s, cx| s.select_channel(id, cx)))
             .on_mouse_up(MouseButton::Right, move |e, _, cx| {
                 let at = e.position;
-                let mut items = vec![MenuItem {
-                    label: "Mark as read".into(),
-                    danger: false,
-                    action: std::rc::Rc::new({
-                        let state = menu_state.clone();
-                        move |cx| state.update(cx, |s, cx| s.ack(id, cx))
-                    }),
-                }];
-                if dev {
-                    items.push(MenuItem {
-                        label: "Copy channel ID".into(),
-                        danger: false,
-                        action: std::rc::Rc::new(move |cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(id.to_string()))
-                        }),
-                    });
-                }
                 menu_state.update(cx, |s, cx| {
-                    s.set_overlay(Some(Overlay::Menu { at, items }), cx)
+                    s.set_overlay(
+                        Some(Overlay::ChannelMenu {
+                            channel: id,
+                            at,
+                            page: ChannelMenuPage::Main,
+                        }),
+                        cx,
+                    )
                 });
             });
 
@@ -315,6 +307,17 @@ impl ChannelSidebar {
                         .collect(),
                     _ => group.channels,
                 };
+                // Hide Muted Channels keeps the one on screen and any with a mention.
+                let hide_muted = s.store.hides_muted_channels(guild);
+                let channels = channels
+                    .into_iter()
+                    .filter(|c| {
+                        !hide_muted
+                            || Some(*c) == selected
+                            || !s.store.is_channel_muted(*c)
+                            || s.store.read_state(*c).mentions > 0
+                    })
+                    .collect();
                 (header, channels)
             })
             .collect();
@@ -322,6 +325,7 @@ impl ChannelSidebar {
         for (header, channels) in groups {
             if let Some((cat, name, is_collapsed)) = header {
                 let state = self.state.clone();
+                let menu_state = self.state.clone();
                 out.push(
                     div()
                         .id(snowflake_id("category", cat))
@@ -350,6 +354,19 @@ impl ChannelSidebar {
                                 }
                                 cx.emit(StateEvent::Selection);
                             })
+                        })
+                        .on_mouse_up(MouseButton::Right, move |e, _, cx| {
+                            let at = e.position;
+                            menu_state.update(cx, |s, cx| {
+                                s.set_overlay(
+                                    Some(Overlay::ChannelMenu {
+                                        channel: cat,
+                                        at,
+                                        page: ChannelMenuPage::Main,
+                                    }),
+                                    cx,
+                                )
+                            });
                         })
                         .into_any_element(),
                 );

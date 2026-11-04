@@ -58,6 +58,7 @@ pub enum Icon {
     VolumeOff,
     Volume,
     External,
+    Crown,
     Expand,
     ChevronUp,
     Logout,
@@ -107,6 +108,7 @@ impl Icon {
             Self::VolumeOff => "volume-off",
             Self::Volume => "volume",
             Self::External => "external",
+            Self::Crown => "crown",
             Self::Expand => "expand",
             Self::ChevronRight => "chevron-right",
             Self::Bell => "bell",
@@ -225,6 +227,7 @@ impl Icon {
             Self::Volume => {
                 r#"<path d="M4 9v6h3l5 4V5L7 9z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>"#
             }
+            Self::Crown => r#"<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/>"#,
             Self::External => {
                 r#"<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>"#
             }
@@ -235,7 +238,7 @@ impl Icon {
         }
     }
 
-    pub const ALL: [Self; 52] = [
+    pub const ALL: [Self; 53] = [
         Self::Logo,
         Self::Hash,
         Self::Announcement,
@@ -284,6 +287,7 @@ impl Icon {
         Self::VolumeOff,
         Self::Volume,
         Self::External,
+        Self::Crown,
         Self::Expand,
         Self::ChevronUp,
         Self::Logout,

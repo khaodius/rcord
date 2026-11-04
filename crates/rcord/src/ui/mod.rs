@@ -2,6 +2,7 @@
 
 pub mod channels;
 pub mod chat;
+pub mod context_menus;
 pub mod friends;
 pub mod icons;
 pub mod login;

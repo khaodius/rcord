@@ -358,3 +358,56 @@ fn parses_stream_events() {
     };
     assert_eq!(d.reason.as_deref(), Some("user_requested"));
 }
+
+#[test]
+fn muted_channels_keep_mentions_but_not_unread() {
+    let mut store = ready();
+    assert!(store.is_unread(id(201)));
+    assert_eq!(store.guild_unread(id(100)), (true, 2));
+    let change = apply(
+        &mut store,
+        "USER_GUILD_SETTINGS_UPDATE",
+        json!({
+            "guild_id": "100",
+            "muted": false,
+            "message_notifications": 3,
+            "hide_muted_channels": true,
+            "channel_overrides": [
+                {"channel_id": "200", "muted": true, "mute_config": null, "message_notifications": 3}
+            ]
+        }),
+    );
+    assert_eq!(change, Change::Channels(Some(id(100))));
+    // Muting the category mutes the channels in it.
+    assert!(store.is_channel_muted(id(201)));
+    assert!(!store.is_unread(id(201)));
+    assert_eq!(store.guild_unread(id(100)), (false, 2));
+    assert!(store.hides_muted_channels(id(100)));
+    assert_eq!(
+        store.guild_notify_level(id(100)),
+        rcord_model::NotifyLevel::All
+    );
+}
+
+#[test]
+fn ready_reads_versioned_guild_settings() {
+    let mut store = Store::new(50);
+    apply(
+        &mut store,
+        "READY",
+        json!({
+            "session_id": "s",
+            "user": {"id": "1", "username": "me"},
+            "guilds": [{"id": "100", "properties": {"name": "G"}, "channels": []}],
+            "user_guild_settings": {"entries": [
+                {"guild_id": "100", "muted": true, "mute_config": null, "message_notifications": 2,
+                 "channel_overrides": []}
+            ], "version": 3, "partial": false}
+        }),
+    );
+    assert!(store.is_guild_muted(id(100)));
+    assert_eq!(
+        store.guild_notify_level(id(100)),
+        rcord_model::NotifyLevel::Nothing
+    );
+}
