@@ -55,8 +55,13 @@ jobs:
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          PRIVATE: ${{ github.event.repository.private }}
         run: |
-          if gh release view --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          # The scripts download without signing in, which only works for a public repository.
+          if [ "$PRIVATE" = true ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "The repository is private, so the scripts cannot download its releases; skipping."
+          elif gh release view --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"

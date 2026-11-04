@@ -174,6 +174,8 @@ enum NetEvent {
         code: Option<u16>,
     },
     Latency(Duration),
+    /// READY could not be read, so there is nothing to show.
+    ReadyFailed(String),
 }
 
 impl AppState {
@@ -347,6 +349,10 @@ impl AppState {
                         GatewayEvent::Dispatch(d) => match rcord_store::parse(&d.name, &d.data) {
                             Ok(Update::Ignored) => continue,
                             Ok(update) => NetEvent::Update(Box::new(update)),
+                            Err(e) if &*d.name == "READY" => {
+                                tracing::error!("could not parse READY: {e}");
+                                NetEvent::ReadyFailed(e.to_string())
+                            }
                             Err(e) => {
                                 tracing::warn!("could not parse {}: {e}", d.name);
                                 continue;
@@ -457,6 +463,16 @@ impl AppState {
                 }
             }
             NetEvent::Latency(d) => self.latency = Some(d),
+            NetEvent::ReadyFailed(e) => {
+                // The token is fine, so it stays in the keychain for the next start.
+                self.gateway = None;
+                self.pump = None;
+                self.connection = Connection::Offline;
+                self.login_error = Some(format!(
+                    "Signed in, but rcord could not read your account data ({e}). Update rcord, or report this."
+                ));
+                self.set_screen(Screen::Login, cx);
+            }
         }
     }
 

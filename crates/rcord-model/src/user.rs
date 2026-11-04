@@ -29,14 +29,22 @@ pub struct User {
     #[serde(default)]
     pub system: bool,
     /// The server tag shown next to the name.
-    #[serde(default, alias = "clan")]
+    #[serde(default)]
     pub primary_guild: Option<PrimaryGuild>,
+    /// The older name for `primary_guild`. Discord sends both, so it cannot be an alias.
+    #[serde(default)]
+    pub clan: Option<PrimaryGuild>,
     /// Only present on the signed-in user.
     #[serde(default)]
     pub email: Option<String>,
 }
 
 impl User {
+    /// The server tag the user shows, from either field Discord sends it in.
+    pub fn server_tag(&self) -> Option<&PrimaryGuild> {
+        self.primary_guild.as_ref().or(self.clan.as_ref())
+    }
+
     /// The name shown in the UI: global display name, then username.
     pub fn display_name(&self) -> &str {
         self.global_name
@@ -385,6 +393,26 @@ mod tests {
 
     fn user(json: &str) -> User {
         serde_json::from_str(json).unwrap()
+    }
+
+    /// The shape of `/users/@me` as Discord sends it, with the server tag under both names.
+    #[test]
+    fn reads_current_user() {
+        let u = user(
+            r#"{"id":"80351110224678912","username":"nelly","avatar":"8342729096ea3675442027381ff50dfe",
+            "discriminator":"0","public_flags":64,"flags":64,"banner":null,"accent_color":null,
+            "global_name":"Nelly","avatar_decoration_data":{"asset":"a_fed43ab12698df65902ba06727e20c0e","sku_id":"1144058844004233369","expires_at":null},
+            "collectibles":null,"display_name_styles":null,"banner_color":null,
+            "clan":{"identity_guild_id":"1","identity_enabled":true,"tag":"RC","badge":"abc"},
+            "primary_guild":{"identity_guild_id":"1","identity_enabled":true,"tag":"RC","badge":"abc"},
+            "mfa_enabled":true,"locale":"en-US","premium_type":2,"email":"nelly@example.com",
+            "verified":true,"phone":null,"nsfw_allowed":true,"linked_users":[],"bio":"",
+            "authenticator_types":[2],"age_verification_status":1}"#,
+        );
+        assert_eq!(u.server_tag().and_then(|t| t.tag.as_deref()), Some("RC"));
+        assert_eq!(u.email.as_deref(), Some("nelly@example.com"));
+        let old = user(r#"{"id":"1","username":"a","clan":{"tag":"OLD"}}"#);
+        assert_eq!(old.server_tag().and_then(|t| t.tag.as_deref()), Some("OLD"));
     }
 
     #[test]

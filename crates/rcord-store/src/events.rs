@@ -87,23 +87,63 @@ pub enum Update {
 #[derive(Debug, Deserialize)]
 pub struct Ready {
     pub user: User,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_vec")]
     pub users: Vec<User>,
     #[serde(default)]
     pub guilds: Vec<Box<RawValue>>,
     #[serde(skip)]
     pub parsed_guilds: Vec<Guild>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_vec")]
     pub private_channels: Vec<Channel>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_vec")]
     pub relationships: Vec<Relationship>,
     #[serde(default)]
     pub read_state: ReadStates,
     /// One list per guild, in the order of `guilds`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_nested")]
     pub merged_members: Vec<Vec<Member>>,
     #[serde(default)]
     pub session_id: String,
+}
+
+/// Reads a list item by item, skipping items that do not parse, so one object in a shape
+/// rcord does not expect costs that object and not the whole connection.
+fn lenient_vec<'de, D, T>(de: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let raw: Option<Vec<Box<RawValue>>> = Deserialize::deserialize(de)?;
+    Ok(raw
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| {
+            serde_json::from_str(item.get())
+                .map_err(|e| tracing::warn!("skipping an item in READY: {e}"))
+                .ok()
+        })
+        .collect())
+}
+
+fn lenient_nested<'de, D, T>(de: D) -> Result<Vec<Vec<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let raw: Option<Vec<Vec<Box<RawValue>>>> = Deserialize::deserialize(de)?;
+    Ok(raw
+        .unwrap_or_default()
+        .into_iter()
+        .map(|list| {
+            list.into_iter()
+                .filter_map(|item| {
+                    serde_json::from_str(item.get())
+                        .map_err(|e| tracing::warn!("skipping a member in READY: {e}"))
+                        .ok()
+                })
+                .collect()
+        })
+        .collect())
 }
 
 /// With versioned read states this is `{entries: [...]}`; without, a bare list.

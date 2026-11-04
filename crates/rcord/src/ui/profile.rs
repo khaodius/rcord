@@ -176,7 +176,7 @@ pub fn profile_card(
         .avatar_decoration_data
         .as_ref()
         .map(|d| cdn::avatar_decoration(&d.asset, 240));
-    let tag = user.primary_guild.as_ref().and_then(|p| p.tag.clone());
+    let tag = user.server_tag().and_then(|p| p.tag.clone());
 
     let state_for_bio = state.clone();
     let bio_el = bio.map(|bio| {

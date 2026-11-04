@@ -53,6 +53,8 @@
   rules for emoji and avatars, reduced motion, link underlines, role color contrast, streamer mode,
   privacy, notifications, voice and screen share preferences, language, cache sizes and developer
   mode. Every change applies immediately and is saved as plain TOML.
+- **Updates** at start: when a newer release is out, rcord asks, then installs it in the
+  background without installer screens and restarts. It can be turned off in Settings.
 - **Rebindable shortcuts** for every action, recorded by pressing the keys.
 - **Resilient connection**: zlib-compressed gateway, session resume after a drop, reconnects with
   backoff, heartbeat timeouts detected, and Discord's rate limits followed per route.

@@ -513,6 +513,8 @@ pub struct Advanced {
     pub close_to_tray: bool,
     /// Discord's client build number, sent when signing in.
     pub client_build_number: u64,
+    /// Looks for a newer rcord at each start and offers to install it.
+    pub check_for_updates: bool,
 }
 
 impl Default for Advanced {
@@ -524,6 +526,7 @@ impl Default for Advanced {
             start_minimized: false,
             close_to_tray: false,
             client_build_number: 0,
+            check_for_updates: true,
         }
     }
 }

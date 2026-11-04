@@ -9,6 +9,7 @@ mod net;
 mod state;
 mod theme;
 mod ui;
+mod update;
 mod webview;
 
 use std::borrow::Cow;
@@ -16,7 +17,8 @@ use std::sync::Arc;
 
 use gpui::{
     App, AppContext, Application, Bounds, Context, Entity, FontWeight, Global, IntoElement, Render,
-    Subscription, TitlebarOptions, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
+    Subscription, Task, TitlebarOptions, Window, WindowBounds, WindowOptions, div, prelude::*, px,
+    size,
 };
 use rcord_settings::{Keybinds, Paths, Settings};
 
@@ -51,11 +53,20 @@ pub fn rebind_keys(keybinds: &Keybinds, cx: &mut App) {
     ui::workspace::bind_keys(keybinds, cx);
 }
 
+enum UpdateUi {
+    None,
+    Available(update::Release),
+    Installing(String),
+    Failed(String),
+}
+
 struct Root {
     state: Entity<AppState>,
     images: Entity<LruImageCache>,
     login: Option<Entity<LoginView>>,
     workspace: Option<Entity<Workspace>>,
+    update: UpdateUi,
+    _update_task: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
 
@@ -81,14 +92,21 @@ impl Root {
                 _ => {}
             },
         )];
+        let check = state.read(cx).settings.advanced.check_for_updates
+            && std::env::var_os("RCORD_DEMO").is_none();
         let mut this = Self {
             state: state.clone(),
             images,
             login: None,
             workspace: None,
+            update: UpdateUi::None,
+            _update_task: None,
             _subs: subs,
         };
         this.sync_screen(state, window, cx);
+        if check {
+            this.check_for_update(cx);
+        }
         this
     }
 
@@ -114,6 +132,185 @@ impl Root {
             }
             Screen::Starting | Screen::Connecting => {}
         }
+    }
+
+    fn check_for_update(&mut self, cx: &mut Context<Self>) {
+        let run = cx.global::<Net>().run(update::check());
+        self._update_task = Some(cx.spawn(async move |this, cx| match run.await {
+            Some(Ok(Some(release))) => {
+                this.update(cx, |this, cx| {
+                    this.update = UpdateUi::Available(release);
+                    cx.notify();
+                })
+                .ok();
+            }
+            Some(Ok(None)) => {}
+            Some(Err(e)) => tracing::info!("could not check for updates: {e}"),
+            None => {}
+        }));
+    }
+
+    fn install_update(&mut self, cx: &mut Context<Self>) {
+        let UpdateUi::Available(release) = std::mem::replace(&mut self.update, UpdateUi::None)
+        else {
+            return;
+        };
+        self.update = UpdateUi::Installing(release.version.clone());
+        let run = cx.global::<Net>().run(update::apply(release));
+        self._update_task = Some(cx.spawn(async move |this, cx| {
+            let result = run.await;
+            this.update(cx, |this, cx| match result {
+                Some(Ok(update::Applied::Restart(exe))) => {
+                    match std::process::Command::new(&exe).spawn() {
+                        Ok(_) => cx.quit(),
+                        Err(e) => {
+                            this.update = UpdateUi::Failed(format!(
+                                "Updated, but could not restart rcord ({e}). Start it again yourself."
+                            ));
+                            cx.notify();
+                        }
+                    }
+                }
+                Some(Ok(update::Applied::Quit)) => cx.quit(),
+                Some(Err(e)) => {
+                    tracing::warn!("update failed: {e:#}");
+                    this.update = UpdateUi::Failed(format!("The update did not install: {e}"));
+                    cx.notify();
+                }
+                None => {
+                    this.update = UpdateUi::Failed("The update did not install.".into());
+                    cx.notify();
+                }
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    fn update_prompt(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let t = theme(cx).clone();
+        let (title, body, actions): (String, String, bool) = match &self.update {
+            UpdateUi::None => return None,
+            UpdateUi::Available(r) => (
+                "Update available".into(),
+                format!(
+                    "rcord {} is out; you have {}. It installs in the background and rcord restarts on its own.",
+                    r.version,
+                    update::CURRENT
+                ),
+                true,
+            ),
+            UpdateUi::Installing(v) => (
+                format!("Updating to {v}"),
+                "Downloading and installing. rcord restarts when it is done.".into(),
+                false,
+            ),
+            UpdateUi::Failed(m) => ("Update failed".into(), m.clone(), false),
+        };
+        let notes = match &self.update {
+            UpdateUi::Available(r) => Some(r.url.clone()),
+            _ => None,
+        };
+        let failed = matches!(self.update, UpdateUi::Failed(_));
+        let button = |id: &'static str, label: &'static str, primary: bool| {
+            div()
+                .id(id)
+                .h(px(36.))
+                .px(px(16.))
+                .flex()
+                .items_center()
+                .rounded(t.radius_small)
+                .cursor_pointer()
+                .font_weight(FontWeight::MEDIUM)
+                .text_sm()
+                .when(primary, |el| {
+                    el.bg(t.accent)
+                        .text_color(t.accent_text)
+                        .hover(|s| s.bg(t.accent_hover))
+                })
+                .when(!primary, |el| {
+                    el.text_color(t.text).hover(|s| s.underline())
+                })
+                .child(label)
+        };
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .occlude()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::hsla(0., 0., 0., 0.6))
+                .font_family("Inter")
+                .child(
+                    div()
+                        .id("update-prompt")
+                        .w(px(440.))
+                        .max_w_full()
+                        .p(px(24.))
+                        .rounded(t.radius)
+                        .bg(t.base)
+                        .border_1()
+                        .border_color(t.border)
+                        .shadow_lg()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.))
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .text_xl()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(t.header)
+                                .child(title),
+                        )
+                        .child(div().text_color(t.text_muted).child(body))
+                        .when(actions, |el| {
+                            el.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(t.text_faint)
+                                    .child("Turn these checks off in Settings > Advanced."),
+                            )
+                        })
+                        .child(
+                            div()
+                                .pt(px(8.))
+                                .flex()
+                                .justify_end()
+                                .gap(px(8.))
+                                .when_some(notes, |el, url| {
+                                    el.child(
+                                        button("update-notes", "What's new", false)
+                                            .on_click(move |_, _, cx| cx.open_url(&url)),
+                                    )
+                                })
+                                .when(actions, |el| {
+                                    el.child(button("update-later", "Later", false).on_click(
+                                        cx.listener(|this, _, _, cx| {
+                                            this.update = UpdateUi::None;
+                                            cx.notify();
+                                        }),
+                                    ))
+                                    .child(
+                                        button("update-now", "Update and restart", true).on_click(
+                                            cx.listener(|this, _, _, cx| this.install_update(cx)),
+                                        ),
+                                    )
+                                })
+                                .when(failed, |el| {
+                                    el.child(button("update-close", "Close", true).on_click(
+                                        cx.listener(|this, _, _, cx| {
+                                            this.update = UpdateUi::None;
+                                            cx.notify();
+                                        }),
+                                    ))
+                                }),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     fn splash(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -159,10 +356,13 @@ impl Render for Root {
             }
             _ => None,
         };
+        let prompt = self.update_prompt(cx);
         div()
             .size_full()
+            .relative()
             .image_cache(self.images.clone())
             .child(body.unwrap_or_else(|| self.splash(cx).into_any_element()))
+            .children(prompt)
     }
 }
 
@@ -191,6 +391,10 @@ fn main() {
     let paths = Paths::detect();
     let settings = load_settings(paths.as_ref());
     let demo = std::env::var_os("RCORD_DEMO").is_some();
+    std::thread::Builder::new()
+        .name("rcord-update-clean".into())
+        .spawn(update::clean_up)
+        .ok();
     let build = match settings.advanced.client_build_number {
         0 => paths
             .as_ref()

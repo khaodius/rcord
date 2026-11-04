@@ -3,6 +3,17 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
+## 0.1.2 - 2026-11-04
+
+- **Sign-in fixed**: after a successful sign-in rcord failed with "duplicate field
+  `primary_guild`", because Discord sends the server tag under its old and new names at once.
+  Both are read now, and an object in a shape rcord does not expect only skips that object
+  instead of stopping the connection.
+- **Updates**: at each start rcord checks for a newer release and asks to install it. Accepting
+  downloads it, checks it against the release checksums, installs it without any installer
+  screens and restarts rcord. On Linux, .deb and .rpm installs ask for your password the way
+  system updates do. Turn the check off in Settings > Advanced.
+
 ## 0.1.1 - 2026-11-04
 
 - **Email or phone and password sign-in**, laid out like Discord's login screen, with

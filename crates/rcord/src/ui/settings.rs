@@ -1275,6 +1275,19 @@ impl SettingsView {
                 t,
                 cx,
             ),
+            heading("Updates", t),
+            self.toggle(
+                "Check for updates when rcord starts",
+                concat!(
+                    "Asks before installing. Updates download, install without any installer screens and restart rcord. This is version ",
+                    env!("CARGO_PKG_VERSION"),
+                    "."
+                ),
+                s,
+                |s| &mut s.advanced.check_for_updates,
+                t,
+                cx,
+            ),
             heading("Caches", t),
             self.slider_u32(
                 "Image memory",

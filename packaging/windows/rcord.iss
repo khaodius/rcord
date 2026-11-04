@@ -54,3 +54,11 @@ Name: "{userdesktop}\rcord"; Filename: "{app}\rcord.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\rcord.exe"; Description: "{cm:LaunchProgram,rcord}"; Flags: nowait postinstall skipifsilent
+; rcord's own updater passes /RESTARTRCORD=1 so the new version starts after a silent upgrade.
+Filename: "{app}\rcord.exe"; Flags: nowait; Check: RestartRequested
+
+[Code]
+function RestartRequested: Boolean;
+begin
+  Result := ExpandConstant('{param:RESTARTRCORD|0}') = '1';
+end;
