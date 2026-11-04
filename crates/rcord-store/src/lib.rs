@@ -12,7 +12,7 @@ use rcord_model::{
 };
 use rustc_hash::FxHashMap;
 
-pub use events::{MemberListGroup, Update, parse};
+pub use events::{MemberListGroup, Update, VoiceServerUpdate, parse};
 use events::{MemberListItem, MemberListOp, MemberListUpdate, ReactionEvent};
 
 /// What an update changed, so views redraw only what they show.
@@ -806,7 +806,7 @@ impl Store {
                 }
                 Change::Everything
             }
-            Update::Resumed | Update::Ignored => Change::None,
+            Update::Resumed | Update::VoiceServerUpdate(_) | Update::Ignored => Change::None,
             Update::MessageCreate(message) => {
                 let message = *message;
                 let channel_id = message.channel_id;

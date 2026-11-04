@@ -231,3 +231,41 @@ fn unknown_events_are_ignored() {
         Change::None
     );
 }
+
+#[test]
+fn voice_server_update_is_parsed_not_cached() {
+    let raw = to_raw_value(&json!({
+        "token": "abc",
+        "guild_id": "100",
+        "endpoint": "c-ams10-1234.discord.media:443"
+    }))
+    .unwrap();
+    let Update::VoiceServerUpdate(v) = parse("VOICE_SERVER_UPDATE", &raw).unwrap() else {
+        panic!("expected a voice server update");
+    };
+    assert_eq!(v.guild_id, Some(id(100)));
+    assert_eq!(
+        v.endpoint.as_deref(),
+        Some("c-ams10-1234.discord.media:443")
+    );
+
+    // A server reallocation sends no endpoint, and a direct call names the channel.
+    let raw = to_raw_value(&json!({"token": "t", "channel_id": "5", "endpoint": null})).unwrap();
+    let Update::VoiceServerUpdate(v) = parse("VOICE_SERVER_UPDATE", &raw).unwrap() else {
+        panic!("expected a voice server update");
+    };
+    assert_eq!(
+        (v.guild_id, v.channel_id, v.endpoint),
+        (None, Some(id(5)), None)
+    );
+
+    let mut store = ready();
+    assert_eq!(
+        apply(
+            &mut store,
+            "VOICE_SERVER_UPDATE",
+            json!({"token": "t", "guild_id": "100"})
+        ),
+        Change::None
+    );
+}

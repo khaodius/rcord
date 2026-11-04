@@ -29,6 +29,7 @@ rcord-model.workspace = true
 rcord-rest.workspace = true
 rcord-settings.workspace = true
 rcord-store.workspace = true
+rcord-voice.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

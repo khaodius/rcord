@@ -141,7 +141,9 @@ pub struct AppState {
     pub self_mute: bool,
     pub self_deaf: bool,
     pub status: Status,
-    gateway: Option<rcord_gateway::Handle>,
+    pub(crate) gateway: Option<rcord_gateway::Handle>,
+    /// The call this client is in, if any.
+    pub call: Option<crate::voice::Call>,
     pump: Option<Task<()>>,
     subscribed: BTreeMap<Snowflake, Snowflake>,
     last_typing_sent: HashMap<Snowflake, u64>,
@@ -204,6 +206,7 @@ impl AppState {
             self_deaf: false,
             status: Status::Online,
             gateway: None,
+            call: None,
             pump: None,
             subscribed: BTreeMap::new(),
             last_typing_sent: HashMap::new(),
@@ -410,6 +413,7 @@ impl AppState {
     }
 
     pub fn sign_out(&mut self, cx: &mut Context<Self>) {
+        self.call = None;
         self.gateway = None;
         self.pump = None;
         cx.global::<Net>().sign_out();
@@ -430,6 +434,7 @@ impl AppState {
     fn handle_net(&mut self, event: NetEvent, cx: &mut Context<Self>) {
         match event {
             NetEvent::Update(update) => {
+                self.voice_gateway_update(&update, cx);
                 let is_ready = matches!(*update, Update::Ready(_));
                 let big = is_ready || matches!(*update, Update::ReadySupplemental(_));
                 let change = self.store.apply(*update, now_ms());
@@ -996,45 +1001,6 @@ impl AppState {
         }
     }
 
-    /// Voice media is not wired up yet, so joining is refused rather than leaving the
-    /// account sitting silently in the channel for everyone else.
-    pub fn join_voice(&mut self, _channel: Snowflake, cx: &mut Context<Self>) {
-        self.toast(
-            "Voice is not available in this build yet. See the roadmap in the README.",
-            cx,
-        );
-    }
-
-    pub fn leave_voice(&mut self, cx: &mut Context<Self>) {
-        let guild = self.store.my_voice_state().and_then(|v| v.guild_id);
-        if let Some(gw) = &self.gateway {
-            gw.send(Command::UpdateVoiceState(rcord_gateway::VoiceStateUpdate {
-                guild_id: guild,
-                channel_id: None,
-                self_mute: self.self_mute,
-                self_deaf: self.self_deaf,
-                self_video: false,
-            }));
-        }
-        cx.notify();
-    }
-
-    pub fn set_mute(&mut self, mute: bool, deaf: bool, cx: &mut Context<Self>) {
-        self.self_mute = mute || deaf;
-        self.self_deaf = deaf;
-        if let (Some(gw), Some(v)) = (&self.gateway, self.store.my_voice_state()) {
-            gw.send(Command::UpdateVoiceState(rcord_gateway::VoiceStateUpdate {
-                guild_id: v.guild_id,
-                channel_id: v.channel_id,
-                self_mute: self.self_mute,
-                self_deaf: self.self_deaf,
-                self_video: false,
-            }));
-        }
-        cx.emit(StateEvent::Store(Change::Me));
-        cx.notify();
-    }
-
     pub fn set_status(&mut self, status: Status, cx: &mut Context<Self>) {
         self.status = status;
         if let Some(gw) = &self.gateway {
@@ -1212,6 +1178,7 @@ impl AppState {
     pub fn update_settings(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Settings)) {
         f(&mut self.settings);
         self.settings.sanitize();
+        self.voice_settings_changed();
         self.store
             .set_message_cap(self.settings.chat.messages_per_channel as usize);
         cx.set_global(Theme::from_settings(&self.settings.appearance));
