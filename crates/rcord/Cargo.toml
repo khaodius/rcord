@@ -20,11 +20,13 @@ futures.workspace = true
 gpui.workspace = true
 gpui_http_client = "0.2.2"
 http.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 parking_lot.workspace = true
 qrcode.workspace = true
 rcord-auth.workspace = true
 rcord-gateway.workspace = true
 rcord-markup.workspace = true
+rcord-media.workspace = true
 rcord-model.workspace = true
 rcord-rest.workspace = true
 rcord-settings.workspace = true
@@ -42,6 +44,10 @@ unicode-segmentation = "1.12"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+ksni = { version = "0.3.7", default-features = false, features = ["async-io", "blocking"] }
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = { version = "0.26.1", default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

@@ -78,7 +78,13 @@
   that adapts to the room or follows a fixed threshold, a jitter buffer per speaker with
   forward error correction for lost packets, and speaking rings in the channel list.
 
-Video and screen share are not available yet; see the [roadmap](#roadmap).
+- **Video player**: MP4 and MOV videos in chat play inside rcord, with H.264 decoded by
+  OpenH264 and AAC sound by Symphonia, a seek bar, volume and keyboard controls.
+- **Window**: an optional slim title bar with minimize, maximize and close for desktops that
+  draw none, close to tray on Linux and Windows, servers in your own order, and a Home button
+  that shows the logo, the friends icon, your avatar or your own picture.
+
+Screen share is not available yet; see the [roadmap](#roadmap).
 
 ## Install
 
@@ -202,11 +208,12 @@ Every shortcut can be changed in Settings > Keybinds.
 
 - **Voice**: push to talk with a global key, echo cancellation, per-user volume in the
   participant menu, and an input level meter in Settings.
-- **Screen share (Go Live)** and video with hardware encoding where available.
+- **Screen share (Go Live)** and camera video with hardware encoding where available, and
+  more video formats in the player (WebM, HEVC).
 - **Composer**: multi-line messages, editing your last message with Up, file uploads, emoji and
   mention autocomplete.
 - **Threads and forums** as their own views, pinned messages, and message search.
-- **Desktop notifications** and a tray icon, following the settings that are already in place.
+- **Desktop notifications**, following the settings that are already in place.
 
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the pieces fit together.
 
@@ -249,6 +256,7 @@ The workspace is split so most of the client is tested without a window:
 | Crate                                     | Purpose                                                     |
 | ----------------------------------------- | ----------------------------------------------------------- |
 | [`rcord`](crates/rcord)                   | The application: views, state, settings screen              |
+| [`rcord-media`](crates/rcord-media)       | MP4 playback: H.264 and AAC decoding, sound out             |
 | [`rcord-model`](crates/rcord-model)       | Discord's objects, permissions and CDN URLs                 |
 | [`rcord-gateway`](crates/rcord-gateway)   | The gateway connection: compression, heartbeat, resume      |
 | [`rcord-rest`](crates/rcord-rest)         | The HTTP API with per-route rate limits                     |
@@ -269,4 +277,5 @@ release workflow builds, tags and publishes it.
 ## License
 
 [Apache License 2.0](LICENSE). The bundled Inter and JetBrains Mono fonts keep their own
-licenses, listed in [assets/fonts](assets/fonts/README.md).
+licenses, listed in [assets/fonts](assets/fonts/README.md). The video player compiles
+Cisco's OpenH264 (BSD-2-Clause) from source.

@@ -14,6 +14,7 @@ use crate::ui::chat::ChatView;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::profile::profile_card;
 use crate::ui::text_input::{InputEvent, TextInput};
+use crate::ui::video::VideoPlayer;
 use crate::ui::{Tooltip, section_label};
 
 /// Common Unicode emoji with the names the picker searches by.
@@ -165,6 +166,7 @@ pub struct OverlayLayer {
     chat: Entity<ChatView>,
     search: Entity<TextInput>,
     switcher: Entity<TextInput>,
+    video: Option<Entity<VideoPlayer>>,
     _subs: Vec<Subscription>,
 }
 
@@ -232,6 +234,7 @@ impl OverlayLayer {
             chat,
             search,
             switcher,
+            video: None,
             _subs: subs,
         }
     }
@@ -241,6 +244,33 @@ impl OverlayLayer {
             Overlay::Expressions(_) => window.focus(&self.search.focus_handle(cx)),
             Overlay::QuickSwitcher => window.focus(&self.switcher.focus_handle(cx)),
             _ => {}
+        }
+    }
+
+    /// Opens or closes the video player to match the overlay. Closing drops the player,
+    /// which stops its thread and its sound.
+    pub fn sync_video(
+        &mut self,
+        overlay: Option<&Overlay>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match overlay {
+            Some(Overlay::Video(source)) => {
+                if self
+                    .video
+                    .as_ref()
+                    .is_none_or(|v| v.read(cx).source != *source)
+                {
+                    let state = self.state.clone();
+                    let source = source.clone();
+                    self.video = Some(cx.new(|cx| VideoPlayer::new(state, source, window, cx)));
+                }
+                if let Some(v) = &self.video {
+                    window.focus(&v.focus_handle(cx));
+                }
+            }
+            _ => self.video = None,
         }
     }
 
@@ -893,6 +923,15 @@ impl Render for OverlayLayer {
                     self.state.update(cx, |s, cx| s.load_sticker_packs(cx));
                 }
                 root = scrim_close(root, self.state.clone()).child(self.expressions(tab, cx));
+            }
+            Some(Overlay::Video(_)) => {
+                if let Some(video) = &self.video {
+                    root = scrim_close(root.bg(gpui::black().opacity(0.85)), self.state.clone())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(video.clone());
+                }
             }
             Some(Overlay::QuickSwitcher) => {
                 root = scrim_close(root.bg(t.scrim), self.state.clone())

@@ -1,0 +1,29 @@
+[package]
+name = "rcord-media"
+description = "Video playback for rcord: MP4 with H.264 video and AAC audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-channel.workspace = true
+mp4 = "0.14"
+# Cisco's H.264 decoder, built from the bundled source so packages need no system codec.
+openh264 = "0.9"
+parking_lot.workspace = true
+symphonia = { version = "0.5", default-features = false, features = ["aac"] }
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18", features = ["pulseaudio"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+cpal = "0.18"
+
+[lints]
+workspace = true

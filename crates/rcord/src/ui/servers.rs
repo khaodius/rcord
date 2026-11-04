@@ -13,6 +13,50 @@ use crate::ui::anim_img;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::{Tooltip, mention_badge, should_animate, snowflake_id};
 
+/// A server icon being dragged to a new place in the list.
+#[derive(Clone)]
+struct DraggedGuild {
+    id: Snowflake,
+    content: DragPicture,
+}
+
+#[derive(Clone)]
+enum DragPicture {
+    Image(String),
+    Acronym(String),
+}
+
+/// What follows the pointer while a server is dragged.
+struct GuildDragPreview(DragPicture);
+
+impl Render for GuildDragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme(cx);
+        let inner = match &self.0 {
+            DragPicture::Image(url) => anim_img(url.clone())
+                .size(px(48.))
+                .rounded_full()
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
+            DragPicture::Acronym(a) => div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(a.clone())
+                .into_any_element(),
+        };
+        div()
+            .size(px(48.))
+            .rounded_full()
+            .bg(t.surface)
+            .text_color(t.text)
+            .flex()
+            .items_center()
+            .justify_center()
+            .opacity(0.85)
+            .shadow_lg()
+            .child(inner)
+    }
+}
+
 pub struct ServerRail {
     state: Entity<AppState>,
     scroll: ScrollHandle,
@@ -64,11 +108,6 @@ impl ServerRail {
         } else {
             px(0.)
         };
-        let radius = if selected || hovered {
-            px(16.)
-        } else {
-            px(24.)
-        };
         let state = self.state.clone();
         let id = key.map_or_else(
             || gpui::ElementId::Name("home".into()),
@@ -106,7 +145,7 @@ impl ServerRail {
                 div()
                     .id("icon")
                     .size(px(48.))
-                    .rounded(radius)
+                    .rounded_full()
                     .overflow_hidden()
                     .flex()
                     .items_center()
@@ -125,7 +164,14 @@ impl ServerRail {
                     .child(content)
                     .tooltip(move |_, cx| Tooltip::view(tooltip.clone(), cx))
                     .on_click(move |_, _, cx| {
-                        state.update(cx, |s, cx| s.select_guild(key, cx));
+                        state.update(cx, |s, cx| {
+                            // Home again from Home goes to the friends page.
+                            if key.is_none() && s.guild.is_none() {
+                                s.show_friends(cx);
+                            } else {
+                                s.select_guild(key, cx);
+                            }
+                        });
                     }),
             )
             .when(mentions > 0, |el| {
@@ -156,9 +202,25 @@ impl Render for ServerRail {
             .private_channels()
             .map(|c| state.store.read_state(c.id).mentions)
             .sum();
-        let guilds: Vec<_> = state
+        let order = &state.settings.layout.guild_order;
+        let mut entries: Vec<_> = state.store.guilds().collect();
+        entries.sort_by_key(|g| {
+            order
+                .iter()
+                .position(|id| *id == g.guild.id.get())
+                .unwrap_or(usize::MAX)
+        });
+        let order_now: std::rc::Rc<Vec<Snowflake>> =
+            std::rc::Rc::new(entries.iter().map(|g| g.guild.id).collect());
+        let home_icon = state.settings.appearance.home_icon;
+        let home_path = state.settings.appearance.home_icon_path.clone();
+        let me_avatar = state
             .store
-            .guilds()
+            .me
+            .as_ref()
+            .map(|u| crate::ui::user_avatar_url(u, 48., false));
+        let guilds: Vec<_> = entries
+            .into_iter()
             .map(|g| {
                 let (unread, mentions) = state.store.guild_unread(g.guild.id);
                 let hovered = self.hovered == Some(Some(g.guild.id));
@@ -179,7 +241,7 @@ impl Render for ServerRail {
             false,
             dm_mentions,
             "Direct Messages".into(),
-            icon(Icon::Logo).size(px(28.)).into_any_element(),
+            home_content(home_icon, home_path, me_avatar),
             cx,
         );
 
@@ -204,9 +266,16 @@ impl Render for ServerRail {
             );
 
         for (id, name, acronym, url, unread, mentions) in guilds {
+            let drag_picture = match &url {
+                Some(u) => DragPicture::Image(u.clone()),
+                None => DragPicture::Acronym(acronym.clone()),
+            };
             let content = match url {
-                Some(url) => anim_img(url)
+                // A parent's rounded corners do not clip an image, so the image is rounded
+                // itself; otherwise its square corners show.
+                Some(url) => anim_img(url.clone())
                     .size(px(48.))
+                    .rounded_full()
                     .object_fit(ObjectFit::Cover)
                     .into_any_element(),
                 None => div()
@@ -215,7 +284,13 @@ impl Render for ServerRail {
                     .child(acronym)
                     .into_any_element(),
             };
+            let drag = DraggedGuild {
+                id,
+                content: drag_picture,
+            };
             let state = self.state.clone();
+            let drop_state = self.state.clone();
+            let drop_order = order_now.clone();
             let menu_name = name.clone();
             let item = self.item(
                 Some(id),
@@ -243,6 +318,16 @@ impl Render for ServerRail {
                             .truncate()
                             .child(name.clone()),
                     )
+                })
+                .on_drag(drag, |d, _, _, cx| {
+                    cx.new(|_| GuildDragPreview(d.content.clone()))
+                })
+                .drag_over::<DraggedGuild>(move |style, _, _, cx| {
+                    let t = theme(cx);
+                    style.border_t_2().border_color(t.accent)
+                })
+                .on_drop(move |d: &DraggedGuild, _, cx| {
+                    move_guild(&drop_state, &drop_order, d.id, Some(id), cx);
                 })
                 .on_mouse_up(MouseButton::Right, move |e, _, cx| {
                     let at = e.position;
@@ -273,9 +358,18 @@ impl Render for ServerRail {
             list = list.child(wrapped);
         }
 
+        let end_state = self.state.clone();
+        let end_order = order_now.clone();
         list = list.child(
             div()
                 .id("explore")
+                .drag_over::<DraggedGuild>(|style, _, _, cx| {
+                    let t = theme(cx);
+                    style.border_2().border_color(t.accent)
+                })
+                .on_drop(move |d: &DraggedGuild, _, cx| {
+                    move_guild(&end_state, &end_order, d.id, None, cx);
+                })
                 .flex_none()
                 .size(px(48.))
                 .rounded(px(24.))
@@ -291,5 +385,50 @@ impl Render for ServerRail {
         );
 
         div().size_full().bg(t.base).child(list)
+    }
+}
+
+/// Puts `dragged` just above `target`, or at the end, and saves the whole order.
+fn move_guild(
+    state: &Entity<AppState>,
+    order: &[Snowflake],
+    dragged: Snowflake,
+    target: Option<Snowflake>,
+    cx: &mut gpui::App,
+) {
+    if target == Some(dragged) {
+        return;
+    }
+    let mut ids: Vec<Snowflake> = order.iter().copied().filter(|g| *g != dragged).collect();
+    let at = target
+        .and_then(|t| ids.iter().position(|g| *g == t))
+        .unwrap_or(ids.len());
+    ids.insert(at, dragged);
+    state.update(cx, |s, cx| {
+        s.update_settings(cx, |st| {
+            st.layout.guild_order = ids.iter().map(|g| g.get()).collect();
+        })
+    });
+}
+
+fn home_content(
+    which: rcord_settings::HomeIcon,
+    path: Option<String>,
+    avatar: Option<String>,
+) -> gpui::AnyElement {
+    use rcord_settings::HomeIcon;
+    let picture = |src: gpui::ImageSource| {
+        gpui::img(src)
+            .size(px(48.))
+            .rounded_full()
+            .object_fit(ObjectFit::Cover)
+            .with_fallback(|| icon(Icon::Logo).size(px(28.)).into_any_element())
+            .into_any_element()
+    };
+    match (which, path, avatar) {
+        (HomeIcon::Friends, ..) => icon(Icon::Users).size(px(26.)).into_any_element(),
+        (HomeIcon::Avatar, _, Some(url)) => picture(url.into()),
+        (HomeIcon::Image, Some(p), _) => picture(std::path::PathBuf::from(p).into()),
+        _ => icon(Icon::Logo).size(px(28.)).into_any_element(),
     }
 }

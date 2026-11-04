@@ -674,6 +674,24 @@ impl SettingsView {
                 t,
                 cx,
             ),
+            self.choice(
+                "Home button",
+                s,
+                |s| &mut s.appearance.home_icon,
+                &rcord_settings::HomeIcon::ALL.map(|h| (h.label(), h)),
+                t,
+                cx,
+            ),
+            self.home_picture_row(s, t, cx),
+            heading("Window", t),
+            self.toggle(
+                "rcord title bar",
+                "A slim bar with minimize, maximize and close instead of the system's. On Linux it applies at once; on Windows at the next start.",
+                s,
+                |s| &mut s.appearance.custom_title_bar,
+                t,
+                cx,
+            ),
             heading("Fonts", t),
             self.font_field(
                 FontField::Ui,
@@ -1058,6 +1076,57 @@ impl SettingsView {
     fn rescan_themes(&mut self, cx: &mut Context<Self>) {
         self.installed_themes = Rc::new(scan_themes(self.state.read(cx).paths.as_ref()));
         cx.notify();
+    }
+
+    /// The picture for the Home button, shown when that option is picked.
+    fn home_picture_row(&self, s: &Settings, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        if s.appearance.home_icon != rcord_settings::HomeIcon::Image {
+            return div().into_any_element();
+        }
+        let current = s
+            .appearance
+            .home_icon_path
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "None chosen".into());
+        row("Picture", "PNG, JPEG, GIF or WebP. It is shown round.", t)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(div().text_sm().text_color(t.text_muted).child(current))
+                    .child(
+                        button("home-picture", "Choose…", t.accent, t.accent_text, t)
+                            .on_click(cx.listener(|this, _, _, cx| this.pick_home_picture(cx))),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn pick_home_picture(&mut self, cx: &mut Context<Self>) {
+        let pick = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Choose picture".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = pick.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                this.update(cx, |s| {
+                    s.appearance.home_icon_path = Some(path.to_string_lossy().into_owned());
+                });
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn export_theme(&mut self, cx: &mut Context<Self>) {
