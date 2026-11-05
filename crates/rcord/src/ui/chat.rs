@@ -1,6 +1,6 @@
 //! The chat area: header, the virtualized message list, typing indicator and composer.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui::{
@@ -49,6 +49,7 @@ pub struct ChatView {
     composer: Entity<TextInput>,
     friends: Entity<crate::ui::friends::FriendsView>,
     revealed: Rc<std::cell::RefCell<HashSet<Snowflake>>>,
+    parsed: Rc<std::cell::RefCell<ParsedCache>>,
     focus: FocusHandle,
     _subs: Vec<Subscription>,
 }
@@ -58,14 +59,19 @@ impl ChatView {
         let composer = cx.new(|cx| TextInput::new("Message", cx));
         let mut subs = Vec::new();
         subs.push(cx.subscribe(&state, |this, state, event, cx| {
-            let channel = state.read(cx).channel;
+            let (channel, guild) = {
+                let s = state.read(cx);
+                (s.channel, s.guild)
+            };
             match event {
                 StateEvent::Store(change) => match change {
                     Change::Messages(c) | Change::Typing(c) if Some(*c) == channel => {
                         this.refresh(cx)
                     }
                     Change::Everything => this.refresh(cx),
-                    Change::Members(_) | Change::Guild(_) | Change::Presence(_) => cx.notify(),
+                    // Names, colors and roles of the open server. Presence is not drawn
+                    // here, and other servers' member lists churn constantly.
+                    Change::Members(g) | Change::Guild(g) if Some(*g) == guild => cx.notify(),
                     _ => {}
                 },
                 StateEvent::Selection => this.refresh(cx),
@@ -118,6 +124,7 @@ impl ChatView {
             list,
             composer,
             revealed: Rc::default(),
+            parsed: Rc::default(),
             focus: cx.focus_handle(),
             _subs: subs,
         };
@@ -190,6 +197,7 @@ impl ChatView {
         if channel != self.channel {
             self.channel = channel;
             self.revealed.borrow_mut().clear();
+            self.parsed.borrow_mut().clear();
             self.list.reset(rows.len());
         } else if *self.rows != rows {
             let old = &self.rows;
@@ -577,6 +585,36 @@ struct RowCx {
     state: Entity<AppState>,
     channel: Snowflake,
     revealed: Rc<std::cell::RefCell<HashSet<Snowflake>>>,
+    parsed: Rc<std::cell::RefCell<ParsedCache>>,
+}
+
+/// Parsed message bodies, so redrawing the list does not parse every visible message
+/// again. Keyed by message, and checked against the text in case it was edited.
+#[derive(Default)]
+struct ParsedCache(HashMap<Snowflake, (u64, Rc<Vec<Block>>)>);
+
+impl ParsedCache {
+    const MAX: usize = 2048;
+
+    fn get(&mut self, id: Snowflake, content: &str) -> Rc<Vec<Block>> {
+        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+        let key = BuildHasherDefault::<DefaultHasher>::default().hash_one(content);
+        if let Some((k, blocks)) = self.0.get(&id)
+            && *k == key
+        {
+            return blocks.clone();
+        }
+        if self.0.len() >= Self::MAX {
+            self.0.clear();
+        }
+        let blocks = Rc::new(rcord_markup::parse(content));
+        self.0.insert(id, (key, blocks.clone()));
+        blocks
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 fn render_row(row: &Row, rcx: &RowCx, window: &mut Window, cx: &mut App) -> AnyElement {
@@ -808,7 +846,7 @@ fn render_message(
             .into_any_element();
     }
 
-    let blocks: Vec<Block> = rcord_markup::parse(&m.content);
+    let blocks = rcx.parsed.borrow_mut().get(id, &m.content);
     // A message that is only a GIF link shows the GIF alone, as in Discord.
     let only_gif = settings.chat.link_previews
         && !m.embeds.is_empty()
@@ -1705,6 +1743,7 @@ impl ChatView {
                 .channel
                 .unwrap_or(Snowflake::new(1).unwrap_or_else(|| unreachable!())),
             revealed: self.revealed.clone(),
+            parsed: self.parsed.clone(),
         });
         let messages = list(self.list.clone(), move |ix, window, cx| {
             match rows.get(ix) {

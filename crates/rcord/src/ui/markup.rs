@@ -7,8 +7,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, FontStyle, FontWeight, HighlightStyle, Hsla, InteractiveText, IntoElement,
-    ObjectFit, Pixels, StrikethroughStyle, StyledText, UnderlineStyle, Window, div, img,
-    prelude::*, px,
+    ObjectFit, Pixels, StrikethroughStyle, StyledText, UnderlineStyle, Window, div, prelude::*, px,
 };
 use rcord_markup::{Block, Inline, format_timestamp};
 use rcord_model::{Snowflake, cdn};
@@ -342,11 +341,7 @@ pub fn inline(inlines: &[Inline], cx: &MarkupCx<'_>, jumbo: bool, salt: usize) -
                     animated && cx.animate_emoji,
                     (f32::from(emoji_size) * 2.0) as u32,
                 );
-                img(url)
-                    .id(gpui::ElementId::NamedInteger(
-                        format!("emoji-{salt}-{i}").into(),
-                        cx.key,
-                    ))
+                crate::ui::anim_img(url)
                     .size(emoji_size)
                     .mx(px(1.))
                     .object_fit(ObjectFit::Contain)

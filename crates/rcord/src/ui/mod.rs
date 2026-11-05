@@ -1,5 +1,6 @@
 //! Views and the small components they share.
 
+pub mod anim;
 pub mod channels;
 pub mod chat;
 pub mod context_menus;
@@ -31,12 +32,7 @@ use rcord_settings::Animate;
 use crate::theme::{Theme, theme};
 use icons::{Icon, icon};
 
-/// An image with an ID, which GPUI needs to keep an animated GIF or WebP playing: without
-/// one it has nowhere to keep the current frame and shows the first frame only.
-pub fn anim_img(src: impl Into<SharedString>) -> gpui::Stateful<gpui::Img> {
-    let src: SharedString = src.into();
-    gpui::img(src.clone()).id(gpui::ElementId::Name(src))
-}
+pub use anim::anim_img;
 
 /// A round avatar with an optional status dot cut into its corner.
 pub fn avatar(

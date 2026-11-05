@@ -3,6 +3,24 @@
 Packages for every version are attached to its
 [release](https://github.com/khaodius/rcord/releases), with SHA-256 checksums.
 
+## 0.1.11 - 2026-11-05
+
+- **Much lower CPU use with animated emoji, GIFs and avatars on screen.** Before, one animated
+  image redrew the whole chat on every refresh of the display, 60 to 240 times a second,
+  whatever the GIF's own speed. Now rcord redraws only when the next frame is due, at up to
+  30 frames a second, and several animations share each redraw. In a test with animated
+  images on screen, rcord's UI thread dropped from 17.8% to 9.1% of a core.
+- **Animations pause while rcord is in the background**, as they do in Discord, and carry on
+  when you come back. Background CPU use with animations on screen went from the same as in
+  the foreground to almost nothing.
+- **Less memory for large GIFs.** Their frames are kept at up to 640 pixels on the longest side
+  and 24 MB per animation, larger than rcord ever draws them. GIFs whose frames claim no delay
+  play at 10 frames a second, as in browsers, instead of as fast as the screen refreshes.
+- **Fewer redraws in the background.** The chat no longer redraws for status changes or for
+  member updates in other servers, and the member list no longer redraws for status changes
+  of people who are not in it. Messages are no longer parsed again on every redraw. On Linux,
+  moving the pointer along the window edge no longer redraws the whole window.
+
 ## 0.1.10 - 2026-11-04
 
 - **Right-click a channel** for the menu Discord has. The menu offers:
