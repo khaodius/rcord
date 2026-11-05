@@ -24,10 +24,17 @@ pub struct MemberList {
 impl MemberList {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(&state, |this, state, event, cx| {
-            let guild = state.read(cx).guild;
+            let s = state.read(cx);
+            let guild = s.guild;
             match event {
                 StateEvent::Store(Change::Members(g)) if Some(*g) == guild => this.sync(cx),
-                StateEvent::Store(Change::Presence(_)) => cx.notify(),
+                // Only people this server's list knows about; presence from everyone else
+                // the account can see would otherwise redraw the list many times a second.
+                StateEvent::Store(Change::Presence(user))
+                    if guild.is_some_and(|g| s.store.member(g, *user).is_some()) =>
+                {
+                    cx.notify()
+                }
                 StateEvent::Store(Change::Everything)
                 | StateEvent::Selection
                 | StateEvent::Settings => this.sync(cx),

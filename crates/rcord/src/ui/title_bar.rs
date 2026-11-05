@@ -141,10 +141,13 @@ pub fn resize_grips(window: &Window) -> impl IntoElement {
                 });
             }
             window.on_mouse_event(|e: &gpui::MouseMoveEvent, phase, window, _| {
-                if phase == gpui::DispatchPhase::Capture
-                    && e.pressed_button.is_none()
-                    && edge_at(e.position, window.viewport_size()).is_some()
-                {
+                if phase != gpui::DispatchPhase::Capture || e.pressed_button.is_some() {
+                    return;
+                }
+                // Redraw only when the pointer moves onto another edge or off the edges,
+                // not on every move along one: a refresh redraws every view uncached.
+                let edge = edge_at(e.position, window.viewport_size());
+                if HOVERED_EDGE.replace(edge) != edge {
                     window.refresh();
                 }
             });
@@ -161,6 +164,10 @@ pub fn resize_grips(window: &Window) -> impl IntoElement {
     )
     .absolute()
     .size_0()
+}
+
+thread_local! {
+    static HOVERED_EDGE: std::cell::Cell<Option<ResizeEdge>> = const { std::cell::Cell::new(None) };
 }
 
 fn edge_at(p: Point<Pixels>, size: Size<Pixels>) -> Option<ResizeEdge> {
